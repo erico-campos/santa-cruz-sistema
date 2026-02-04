@@ -2,4 +2,5 @@ streamlit
 pandas
 sqlalchemy
 psycopg2-binary
-reportlab
+st-gsheets-connection
+plotly
