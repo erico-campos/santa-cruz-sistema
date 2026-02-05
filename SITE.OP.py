@@ -269,10 +269,17 @@ if not st.session_state.auth:
     st.stop()
 
 # --- NAVEGAÇÃO COM REDIRECIONAMENTO ---
+
 opcoes = ["📋 Lista de OPs", "📊 Relatório"]
+
+# Se for ADM, ele vê o botão de criar do zero no menu
 if st.session_state.nivel == "ADM":
     opcoes.insert(1, "➕ Nova OP")
     opcoes.append("⚙️ Configurações")
+
+# Se for LIDER e estiver editando, precisamos permitir que ele entre na página oculta
+elif st.session_state.nivel == "LIDER" and st.session_state.edit_op_id is not None:
+    opcoes.insert(1, "➕ Nova OP")
 
 # Lógica para mudar de página sozinho ao editar
 if st.session_state.edit_op_id is not None:
@@ -717,10 +724,11 @@ if menu == "📋 Lista de OPs":
 
                 st.divider()
 
-                # --- 6. BOTÕES DE CONTROLE (PDF, EDITAR, EXCLUIR) ---
+
+                # --- 6. BOTÕES DE AÇÃO (PDF, EDITAR E EXCLUIR) ---
                 c_pdf, c_edit, c_del = st.columns(3)
 
-                # Botão PDF
+                # Botão PDF (Todos veem)
                 c_pdf.download_button(
                     label="📂 Gerar PDF",
                     data=gerar_pdf_op(op),
@@ -729,17 +737,19 @@ if menu == "📋 Lista de OPs":
                     use_container_width=True
                 )
 
-                # Botão Editar
-                if c_edit.button("✏️ Editar OP", key=f"edit_btn_{op['id']}", use_container_width=True):
-                    st.session_state.edit_op_id = op['id']
-                    st.session_state.maq_atual = op['equipamento']
-                    specs_salvas = json.loads(op['info_adicionais_ficha'])
-                    st.session_state.campos_dinamicos = specs_salvas
-                    st.session_state.nomes_specs = list(specs_salvas.keys())
-                    st.session_state.layout_confirmado = True
-                    st.rerun()
+                # Botão Editar (LIBERADO PARA ADM, PCP E LIDER)
+                # Verificamos se o nível não é 'USER' (Vendedores/Visitantes)
+                if st.session_state.nivel in ["ADM", "LIDER"]:
+                    if c_edit.button("✏️ Editar OP", key=f"edit_btn_{op['id']}", use_container_width=True):
+                        st.session_state.edit_op_id = op['id']
+                        st.session_state.maq_atual = op['equipamento']
+                        specs_salvas = json.loads(op['info_adicionais_ficha'])
+                        st.session_state.campos_dinamicos = specs_salvas
+                        st.session_state.nomes_specs = list(specs_salvas.keys())
+                        st.session_state.layout_confirmado = True
+                        st.rerun()
 
-                # Botão Excluir (Só para ADM)
+                # Botão Excluir (CONTINUA APENAS PARA ADM)
                 if st.session_state.nivel == "ADM":
                     if c_del.button("🗑️ Excluir OP", key=f"del_op_{op['id']}", use_container_width=True):
                         with sqlite3.connect('fabrica_master.db') as conn:
