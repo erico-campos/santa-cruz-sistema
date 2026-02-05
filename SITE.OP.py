@@ -290,21 +290,19 @@ else:
 menu = st.sidebar.radio("Navegação", opcoes, index=menu_index, key="menu_principal")
 
 
-# --- CONFIGURAÇÕES ---
-
+# --- PÁGINA DE CONFIGURAÇÕES COMPLETA
 if menu == "⚙️ Configurações":
-    # TRAVA DE SEGURANÇA: Só quem é ADM entra aqui
+    # Trava de Segurança
     if st.session_state.nivel != "ADM":
-        st.error("🚫 Acesso restrito ao Administrador do sistema.")
+        st.error("🚫 Acesso restrito ao Administrador.")
         st.stop()
 
     st.header("⚙️ Configurações do Sistema")
     t1, t2, t3 = st.tabs(["🏗️ Máquinas", "👷 Líderes", "🔑 Usuários"])
 
-    # --- ABA 1: GERENCIAR MÁQUINAS ---
+    # --- ABA 1: MÁQUINAS ---
     with t1:
         st.subheader("Gerenciar Máquinas e Checklists")
-
         val_n, val_c = "", ""
         if st.session_state.edit_maq_id:
             with sqlite3.connect('fabrica_master.db') as conn:
@@ -314,7 +312,7 @@ if menu == "⚙️ Configurações":
 
         with st.form("fm_maq"):
             n = st.text_input("Nome da Máquina", value=val_n)
-            c = st.text_area("Checklist / Conjuntos (Separe os itens por vírgula)", value=val_c)
+            c = st.text_area("Checklist / Conjuntos (Separe por vírgula)", value=val_c)
             c_m1, c_m2 = st.columns(2)
             if c_m1.form_submit_button("💾 SALVAR MÁQUINA"):
                 with sqlite3.connect('fabrica_master.db') as conn:
@@ -324,9 +322,8 @@ if menu == "⚙️ Configurações":
                     else:
                         conn.execute("INSERT OR REPLACE INTO maquinas (nome, conjuntos) VALUES (?,?)", (n, c))
                 st.session_state.edit_maq_id = None
-                st.success("Máquina salva com sucesso!")
                 st.rerun()
-            if c_m2.form_submit_button("➕ NOVO / CANCELAR"):
+            if c_m2.form_submit_button("➕ NOVO"):
                 st.session_state.edit_maq_id = None
                 st.rerun()
 
@@ -345,9 +342,9 @@ if menu == "⚙️ Configurações":
                         conn.execute("DELETE FROM maquinas WHERE id=?", (m['id'],))
                     st.rerun()
 
-    # --- ABA 2: GERENCIAR LÍDERES ---
+    # --- ABA 2: LÍDERES ---
     with t2:
-        st.subheader("Cadastro de Líderes (Setores)")
+        st.subheader("Gerenciar Líderes e Acessos de Fábrica")
         with sqlite3.connect('fabrica_master.db') as conn:
             s_df = pd.read_sql_query("SELECT * FROM setores", conn)
 
@@ -358,15 +355,26 @@ if menu == "⚙️ Configurações":
                 if res: val_nl = res[0]
 
         with st.form("f_lid"):
-            nl = st.text_input("Nome do Líder / Setor", value=val_nl)
-            if st.form_submit_button("💾 SALVAR LÍDER"):
-                with sqlite3.connect('fabrica_master.db') as conn:
-                    if st.session_state.edit_lid_id:
-                        conn.execute("UPDATE setores SET nome=? WHERE id=?", (nl.upper(), st.session_state.edit_lid_id))
-                    else:
-                        conn.execute("INSERT OR IGNORE INTO setores (nome) VALUES (?)", (nl.upper(),))
-                st.session_state.edit_lid_id = None
-                st.rerun()
+            c_l1, c_l2 = st.columns(2)
+            nl = c_l1.text_input("Nome do Líder", value=val_nl)
+            cl = c_l2.text_input("Cargo", value="LIDER")
+            pl = st.text_input("Senha de Acesso", type="password")
+
+            if st.form_submit_button("💾 SALVAR LÍDER E CRIAR USUÁRIO"):
+                if nl:
+                    with sqlite3.connect('fabrica_master.db') as conn:
+                        if st.session_state.edit_lid_id:
+                            conn.execute("UPDATE setores SET nome=? WHERE id=?",
+                                         (nl.upper(), st.session_state.edit_lid_id))
+                        else:
+                            conn.execute("INSERT OR IGNORE INTO setores (nome) VALUES (?)", (nl.upper(),))
+                            if pl:  # Só cria usuário se houver senha
+                                conn.execute("INSERT INTO usuarios (usuario, senha, cargo, ativo) VALUES (?,?,?,1)",
+                                             (nl, pl, cl.upper()))
+                    st.session_state.edit_lid_id = None
+                    st.rerun()
+                else:
+                    st.error("Nome é obrigatório.")
 
         for _, s in s_df.iterrows():
             with st.container(border=True):
@@ -380,9 +388,9 @@ if menu == "⚙️ Configurações":
                         conn.execute("DELETE FROM setores WHERE id=?", (s['id'],))
                     st.rerun()
 
-    # --- ABA 3: GERENCIAR USUÁRIOS E SENHAS ---
+    # --- ABA 3: USUÁRIOS ---
     with t3:
-        st.subheader("Controle de Acessos")
+        st.subheader("Gerenciar Todos os Usuários")
         val_u, val_c = "", ""
         if st.session_state.edit_usr_id:
             with sqlite3.connect('fabrica_master.db') as conn:
@@ -390,12 +398,12 @@ if menu == "⚙️ Configurações":
                                    (st.session_state.edit_usr_id,)).fetchone()
                 if res: val_u, val_c = res[0], res[1]
 
-        with st.form("form_usuarios"):
-            u_nome = st.text_input("Usuário", value=val_u)
+        with st.form("form_usuarios_geral"):
+            u_nome = st.text_input("Nome de Usuário", value=val_u)
             u_senha = st.text_input("Senha", type="password")
-            u_cargo = st.text_input("Cargo (Ex: LIDER, VENDAS, PCP)", value=val_c)
+            u_cargo = st.text_input("Cargo (ADM, PCP, LIDER, VENDEDOR)", value=val_c)
             c_u1, c_u2 = st.columns(2)
-            if c_u1.form_submit_button("💾 SALVAR USUÁRIO"):
+            if c_u1.form_submit_button("💾 SALVAR ALTERAÇÕES"):
                 with sqlite3.connect('fabrica_master.db') as conn:
                     if st.session_state.edit_usr_id:
                         if u_senha:
@@ -420,7 +428,7 @@ if menu == "⚙️ Configurações":
             with st.container(border=True):
                 col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                 stt = "🟢" if u['ativo'] == 1 else "🔴"
-                col1.write(f"**{u['usuario']}** ({u['cargo']})")
+                col1.write(f"**{u['usuario']}** ({u['cargo']}) {stt}")
                 if col2.button("🔄", key=f"tu_{u['id']}"):
                     with sqlite3.connect('fabrica_master.db') as conn:
                         conn.execute("UPDATE usuarios SET ativo=? WHERE id=?", (0 if u['ativo'] == 1 else 1, u['id']))
@@ -776,6 +784,8 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Nenhuma OP em andamento para gerar relatório.")
+
+
 
 
 
