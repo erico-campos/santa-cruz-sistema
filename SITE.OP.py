@@ -599,11 +599,18 @@ with sqlite3.connect('fabrica_master.db') as conn:
 if menu == "📋 Lista de OPs":
     with sqlite3.connect('fabrica_master.db') as conn:
         conn.row_factory = sqlite3.Row
+        # Removido filtros restritivos para que as OPs novas apareçam imediatamente
         ops = conn.execute("SELECT * FROM ordens ORDER BY id DESC").fetchall()
-        cargos_chat = [c[0] for c in conn.execute("SELECT DISTINCT cargo FROM usuarios WHERE ativo=1").fetchall()]
+
+        # Busca cargos ativos para o sistema de mensagens (Acompanhamento)
+        res_cargos = conn.execute("SELECT DISTINCT cargo FROM usuarios WHERE ativo=1").fetchall()
+        cargos_chat = [c[0] for c in res_cargos]
+
+    if not ops:
+        st.info("Nenhuma Ordem de Produção encontrada. Vá em 'Nova OP' para cadastrar.")
 
     for op in ops:
-        # Lógica de cores por prazo
+        # Lógica de cores baseada na data de entrega
         hoje = date.today()
         cor_alerta = "⚪"
         try:
@@ -618,17 +625,18 @@ if menu == "📋 Lista de OPs":
         except:
             dias_restantes = "N/A"
 
+        # Cabeçalho do Card da OP
         with st.expander(f"{cor_alerta} OP {op['numero_op']} - {op['cliente']} | Entrega: {op['data_entrega']}"):
             t1, t2, t3 = st.tabs(["Ficha Técnica", "Checklist", "Acompanhamento"])
 
             with t1:
-                # --- 1. ALERTAS DE PRAZO ---
+                # --- 1. ALERTAS VISUAIS ---
                 if cor_alerta == "🔴":
                     st.error(f"🚨 **URGENTE:** Entrega em {dias_restantes} dias!")
                 elif cor_alerta == "🟡":
                     st.warning(f"⚠️ **ATENÇÃO:** Entrega em {dias_restantes} dias.")
 
-                # --- 2. INFORMAÇÕES GERAIS ---
+                # --- 2. DADOS GERAIS ---
                 st.subheader("📄 Dados do Projeto")
                 c_g1, c_g2, c_g3 = st.columns(3)
                 c_g1.write(f"**Nº OP:** {op['numero_op']}")
@@ -640,7 +648,7 @@ if menu == "📋 Lista de OPs":
 
                 st.divider()
 
-                # --- 3. ESPECIFICAÇÕES TÉCNICAS (DINÂMICAS) ---
+                # --- 3. ESPECIFICAÇÕES DINÂMICAS ---
                 st.subheader("🛠️ Especificações Técnicas")
                 try:
                     specs = json.loads(op['info_adicionais_ficha'])
@@ -648,19 +656,19 @@ if menu == "📋 Lista de OPs":
                     for i, (campo, valor) in enumerate(specs.items()):
                         cols_specs[i % 3].write(f"**{campo}:** {valor}")
                 except:
-                    st.error("Erro ao carregar especificações técnicas.")
+                    st.error("Erro ao carregar dados técnicos.")
 
                 st.divider()
 
                 # --- 4. LOGÍSTICA E DISTRIBUIÇÃO ---
-                st.subheader("🚛 Logística e Distribuição")
+                st.subheader("🚛 Logística e Fábrica")
                 l1, l2, l3 = st.columns(3)
                 l1.write(f"**Material:** {op['est_material']}")
                 l1.write(f"**Altura:** {op['est_altura']}")
                 l2.write(f"**Comprimento:** {op['est_comprimento']}")
                 l2.write(f"**Largura:** {op['est_largura']}")
                 l3.write(f"**Plataforma:** {op['est_plataforma']}")
-                l3.write(f"**Líder:** {op['responsavel_setor']}")
+                l3.write(f"**Líder Responsável:** {op['responsavel_setor']}")
 
                 d_log1, d_log2, d_log3 = st.columns(3)
                 d_log1.write(f"**Vendedor:** {op['dist_vendedor']}")
@@ -670,25 +678,25 @@ if menu == "📋 Lista de OPs":
                 d_log3.write(f"**Elétrica:** {op['dist_eletrica']}")
                 d_log3.write(f"**Montagem:** {op['dist_montagem']}")
 
-                st.write(f"**🔧 Assistência/Info:** {op['ast_instalacao']}")
+                st.info(f"**🔧 Obs/Assistência:** {op['ast_instalacao']}")
 
                 st.divider()
 
-                # --- 5. GESTÃO DE ANEXOS ---
-                st.subheader("📁 Anexos")
+                # --- 5. ANEXOS ---
+                st.subheader("📁 Arquivos")
                 if op['anexo']:
                     caminho_arq = os.path.join("anexos", op['anexo'])
                     if os.path.exists(caminho_arq):
-                        c_arq1, c_arq2 = st.columns(2)
+                        c_a1, c_a2 = st.columns(2)
                         with open(caminho_arq, "rb") as f:
-                            c_arq1.download_button("📥 Baixar Anexo", f, file_name=op['anexo'], key=f"dl_{op['id']}")
-                        if c_arq2.button("🗑️ Remover Anexo", key=f"rm_an_{op['id']}"):
+                            c_a1.download_button("📥 Baixar Anexo", f, file_name=op['anexo'], key=f"dl_{op['id']}")
+                        if c_a2.button("🗑️ Excluir Anexo", key=f"rm_an_{op['id']}"):
                             with sqlite3.connect('fabrica_master.db') as conn:
                                 conn.execute("UPDATE ordens SET anexo=NULL WHERE id=?", (op['id'],))
-                            os.remove(caminho_arq)
+                            if os.path.exists(caminho_arq): os.remove(caminho_arq)
                             st.rerun()
 
-                arquivo_upload = st.file_uploader("Novo Anexo", type=["pdf", "png", "jpg", "jpeg"],
+                arquivo_upload = st.file_uploader("Upload de Foto/PDF", type=["pdf", "png", "jpg", "jpeg"],
                                                   key=f"up_{op['id']}")
                 if arquivo_upload:
                     nome_arq = f"OP_{op['numero_op']}_{arquivo_upload.name}".replace(" ", "_")
@@ -702,10 +710,10 @@ if menu == "📋 Lista de OPs":
 
                 st.divider()
 
-                # --- 6. BOTÕES DE AÇÃO (PDF, EDITAR E EXCLUIR) ---
+                # --- 6. BOTÕES DE CONTROLE (PDF, EDITAR, EXCLUIR) ---
                 c_pdf, c_edit, c_del = st.columns(3)
 
-                # Gerar PDF Individual
+                # Botão PDF
                 c_pdf.download_button(
                     label="📂 Gerar PDF",
                     data=gerar_pdf_op(op),
@@ -714,8 +722,8 @@ if menu == "📋 Lista de OPs":
                     use_container_width=True
                 )
 
-                # Editar a OP
-                if c_edit.button("✏️ Editar", key=f"edit_btn_{op['id']}", use_container_width=True):
+                # Botão Editar
+                if c_edit.button("✏️ Editar OP", key=f"edit_btn_{op['id']}", use_container_width=True):
                     st.session_state.edit_op_id = op['id']
                     st.session_state.maq_atual = op['equipamento']
                     specs_salvas = json.loads(op['info_adicionais_ficha'])
@@ -724,49 +732,59 @@ if menu == "📋 Lista de OPs":
                     st.session_state.layout_confirmado = True
                     st.rerun()
 
-                # Excluir OP (Apenas ADM)
+                # Botão Excluir (Só para ADM)
                 if st.session_state.nivel == "ADM":
-                    if c_del.button("🗑️ Excluir", key=f"del_op_{op['id']}", use_container_width=True):
+                    if c_del.button("🗑️ Excluir OP", key=f"del_op_{op['id']}", use_container_width=True):
                         with sqlite3.connect('fabrica_master.db') as conn:
                             conn.execute("DELETE FROM ordens WHERE id=?", (op['id'],))
-                        st.success("OP removida!")
+                        st.success("Removido!")
                         st.rerun()
 
             with t2:
-                # Checklist
+                # Checklist de Montagem
                 with sqlite3.connect('fabrica_master.db') as conn:
                     m = conn.execute("SELECT conjuntos FROM maquinas WHERE nome=?", (op['equipamento'],)).fetchone()
-                it = [i.strip() for i in m[0].split(",")] if m and m[0] else []
-                done = op['checks_concluidos'].split("|") if op['checks_concluidos'] else []
-                sel = [i for i in it if st.checkbox(i, i in done, key=f"ck_{op['id']}_{i}")]
-                if st.button("Salvar Checklist", key=f"sck_{op['id']}"):
-                    p = int((len(sel) / len(it)) * 100) if it else 0
-                    with sqlite3.connect('fabrica_master.db') as conn:
-                        conn.execute("UPDATE ordens SET progresso=?, checks_concluidos=? WHERE id=?",
-                                     (p, "|".join(sel), op['id']))
-                    st.rerun()
+
+                itens_checklist = [i.strip() for i in m[0].split(",")] if m and m[0] else []
+                concluidos = op['checks_concluidos'].split("|") if op['checks_concluidos'] else []
+
+                if itens_checklist:
+                    selecionados = [i for i in itens_checklist if
+                                    st.checkbox(i, i in concluidos, key=f"ck_{op['id']}_{i}")]
+                    if st.button("💾 Atualizar Progresso", key=f"sck_{op['id']}"):
+                        percentual = int((len(selecionados) / len(itens_checklist)) * 100)
+                        status_texto = "Concluído" if percentual == 100 else "Em Produção"
+                        with sqlite3.connect('fabrica_master.db') as conn:
+                            conn.execute("UPDATE ordens SET progresso=?, checks_concluidos=?, status=? WHERE id=?",
+                                         (percentual, "|".join(selecionados), status_texto, op['id']))
+                        st.success(f"Progresso de {percentual}% salvo!")
+                        st.rerun()
+                else:
+                    st.warning("Nenhum checklist cadastrado para esta máquina nas Configurações.")
 
             with t3:
-                # Acompanhamento (Logs)
+                # Sistema de Logs/Chat Interno
                 logs = json.loads(op['acompanhamento_log'])
-                with st.form(f"chat_{op['id']}"):
-                    dst = st.selectbox("Para", cargos_chat)
-                    msg = st.text_area("Mensagem")
-                    if st.form_submit_button("Enviar"):
+                with st.form(f"chat_form_{op['id']}"):
+                    destinatario = st.selectbox("Enviar para:", cargos_chat)
+                    mensagem = st.text_area("Escrever mensagem...")
+                    if st.form_submit_button("Enviar Mensagem"):
                         logs.append({
-                            "cargo_destino": dst,
+                            "cargo_destino": destinatario,
                             "user_origem": st.session_state.user_logado,
-                            "data_inicio": datetime.now().strftime("%d/%m %H:%M"),
-                            "msg": msg,
-                            "status": "Pendente"
+                            "data": datetime.now().strftime("%d/%m %H:%M"),
+                            "msg": mensagem
                         })
                         with sqlite3.connect('fabrica_master.db') as conn:
                             conn.execute("UPDATE ordens SET acompanhamento_log=? WHERE id=?",
                                          (json.dumps(logs), op['id']))
                         st.rerun()
 
-                for l in reversed(logs):
-                    st.info(f"💬 **De:** {l['user_origem']} → **Para:** {l['cargo_destino']}\n\n{l['msg']}")
+                for msg_log in reversed(logs):
+                    st.chat_message(
+                        "user" if msg_log['user_origem'] == st.session_state.user_logado else "assistant").write(
+                        f"**{msg_log['user_origem']}** para **{msg_log['cargo_destino']}** ({msg_log.get('data', '')})\n\n{msg_log['msg']}"
+                    )
 
 
 # --- RELATÓRIO DINÂMICO COM GRÁFICO POR LÍDER ---
