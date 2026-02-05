@@ -268,17 +268,25 @@ if not st.session_state.auth:
                 st.error("Acesso negado.")
     st.stop()
 
-# --- NAVEGAÇÃO COM REDIRECIONAMENTO ---
+# --- LOGICA DE NAVEGAÇÃO UNIFICADA ---
 opcoes = ["📋 Lista de OPs", "📊 Relatório"]
 
-# ADM e PCP sempre veem o menu de criar OPs
+# Define as permissões de menu
 if st.session_state.nivel == "ADM":
     opcoes.insert(1, "➕ Nova OP")
     opcoes.append("⚙️ Configurações")
-# LIDER só vê o menu de edição se ele tiver clicado em 'Editar' na lista
 elif st.session_state.nivel == "LIDER" and st.session_state.edit_op_id is not None:
+    # O Líder só vê o menu se estiver editando uma OP vinda da Ficha Técnica
     opcoes.insert(1, "➕ Nova OP")
-menu = st.sidebar.radio("Navegação", opcoes, index=0)
+
+# Determina qual aba abrir automaticamente
+if st.session_state.edit_op_id is not None:
+    menu_index = 1  # Foca na "➕ Nova OP" se estiver em edição
+else:
+    menu_index = 0  # Foca na "📋 Lista de OPs" por padrão
+
+# CRIA O MENU (Apenas uma vez no código inteiro!)
+menu = st.sidebar.radio("Navegação", opcoes, index=menu_index, key="menu_principal")
 
 
 # Lógica para mudar de página sozinho ao editar
@@ -747,4 +755,6 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Nenhuma OP em andamento para gerar relatório.")
+
+
 
