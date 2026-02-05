@@ -271,19 +271,23 @@ if not st.session_state.auth:
 # --- LOGICA DE NAVEGAÇÃO UNIFICADA ---
 opcoes = ["📋 Lista de OPs", "📊 Relatório"]
 
-# Define as permissões de menu
+# 1. Define as permissões de menu
 if st.session_state.nivel == "ADM":
     opcoes.insert(1, "➕ Nova OP")
     opcoes.append("⚙️ Configurações")
 elif st.session_state.nivel == "LIDER" and st.session_state.edit_op_id is not None:
-    # O Líder só vê o menu 'Nova OP' enquanto estiver editando uma ficha
+    # O Líder passa a enxergar o menu 'Nova OP' apenas enquanto estiver editando
     opcoes.insert(1, "➕ Nova OP")
 
-# Determina qual aba abrir automaticamente (Index 1 é a Nova OP)
-menu_index = 1 if (st.session_state.edit_op_id is not None and "➕ Nova OP" in opcoes) else 0
+# 2. Força a mudança de aba quando clicar em editar
+# Se houver um ID de edição, o index do rádio será 1 (onde está a 'Nova OP')
+if st.session_state.edit_op_id is not None and "➕ Nova OP" in opcoes:
+    menu_default_index = opcoes.index("➕ Nova OP")
+else:
+    menu_default_index = 0
 
-# MENU ÚNICO (Para evitar erro de DuplicateElementId)
-menu = st.sidebar.radio("Navegação", opcoes, index=menu_index, key="menu_principal")
+# 3. CRIA O MENU ÚNICO
+menu = st.sidebar.radio("Navegação", opcoes, index=menu_default_index, key="menu_principal")
 
 
 # --- CONFIGURAÇÕES ---
@@ -790,8 +794,3 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Nenhuma OP em andamento para gerar relatório.")
-
-
-
-
-
