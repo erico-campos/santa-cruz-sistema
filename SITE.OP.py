@@ -618,7 +618,7 @@ if menu == "📋 Lista de OPs":
         except:
             dias_restantes = "N/A"
 
-        with st.expander(f"{cor_alerta} OP {op['numero_op']} - {op['cliente']} | Entrega em: {op['data_entrega']}"):
+        with st.expander(f"{cor_alerta} OP {op['numero_op']} - {op['cliente']} | Entrega: {op['data_entrega']}"):
             t1, t2, t3 = st.tabs(["Ficha Técnica", "Checklist", "Acompanhamento"])
 
             with t1:
@@ -642,10 +642,13 @@ if menu == "📋 Lista de OPs":
 
                 # --- 3. ESPECIFICAÇÕES TÉCNICAS (DINÂMICAS) ---
                 st.subheader("🛠️ Especificações Técnicas")
-                specs = json.loads(op['info_adicionais_ficha'])
-                cols_specs = st.columns(3)
-                for i, (campo, valor) in enumerate(specs.items()):
-                    cols_specs[i % 3].write(f"**{campo}:** {valor}")
+                try:
+                    specs = json.loads(op['info_adicionais_ficha'])
+                    cols_specs = st.columns(3)
+                    for i, (campo, valor) in enumerate(specs.items()):
+                        cols_specs[i % 3].write(f"**{campo}:** {valor}")
+                except:
+                    st.error("Erro ao carregar especificações técnicas.")
 
                 st.divider()
 
@@ -659,38 +662,33 @@ if menu == "📋 Lista de OPs":
                 l3.write(f"**Plataforma:** {op['est_plataforma']}")
                 l3.write(f"**Líder:** {op['responsavel_setor']}")
 
-                st.write(f"**📍 Endereço de Entrega:** {op['exp_endereco']}")
+                d_log1, d_log2, d_log3 = st.columns(3)
+                d_log1.write(f"**Vendedor:** {op['dist_vendedor']}")
+                d_log1.write(f"**PCP:** {op['dist_pcp']}")
+                d_log2.write(f"**Revisor:** {op['dist_revisor']}")
+                d_log2.write(f"**Projeto:** {op['dist_projeto']}")
+                d_log3.write(f"**Elétrica:** {op['dist_eletrica']}")
+                d_log3.write(f"**Montagem:** {op['dist_montagem']}")
 
-                d1, d2, d3 = st.columns(3)
-                d1.write(f"**Vendedor:** {op['dist_vendedor']}")
-                d1.write(f"**PCP:** {op['dist_pcp']}")
-                d2.write(f"**Revisor:** {op['dist_revisor']}")
-                d2.write(f"**Projeto:** {op['dist_projeto']}")
-                d3.write(f"**Elétrica:** {op['dist_eletrica']}")
-                d3.write(f"**Montagem:** {op['dist_montagem']}")
-                st.write(f"**🔧 Assistência:** {op['ast_instalacao']}")
+                st.write(f"**🔧 Assistência/Info:** {op['ast_instalacao']}")
 
                 st.divider()
 
                 # --- 5. GESTÃO DE ANEXOS ---
-                st.subheader("📁 Anexos e Fotos")
+                st.subheader("📁 Anexos")
                 if op['anexo']:
                     caminho_arq = os.path.join("anexos", op['anexo'])
                     if os.path.exists(caminho_arq):
-                        ext = op['anexo'].split(".")[-1].lower()
-                        if ext in ["png", "jpg", "jpeg"]:
-                            st.image(caminho_arq, caption="Preview do Anexo", width=300)
-
                         c_arq1, c_arq2 = st.columns(2)
                         with open(caminho_arq, "rb") as f:
                             c_arq1.download_button("📥 Baixar Anexo", f, file_name=op['anexo'], key=f"dl_{op['id']}")
-                        if c_arq2.button("🗑️ Remover", key=f"rm_{op['id']}"):
+                        if c_arq2.button("🗑️ Remover Anexo", key=f"rm_an_{op['id']}"):
                             with sqlite3.connect('fabrica_master.db') as conn:
                                 conn.execute("UPDATE ordens SET anexo=NULL WHERE id=?", (op['id'],))
-                            if os.path.exists(caminho_arq): os.remove(caminho_arq)
+                            os.remove(caminho_arq)
                             st.rerun()
 
-                arquivo_upload = st.file_uploader("Novo Anexo (Foto/PDF)", type=["pdf", "png", "jpg", "jpeg"],
+                arquivo_upload = st.file_uploader("Novo Anexo", type=["pdf", "png", "jpg", "jpeg"],
                                                   key=f"up_{op['id']}")
                 if arquivo_upload:
                     nome_arq = f"OP_{op['numero_op']}_{arquivo_upload.name}".replace(" ", "_")
@@ -704,29 +702,38 @@ if menu == "📋 Lista de OPs":
 
                 st.divider()
 
-                # --- 6. BOTÕES DE AÇÃO (CORRIGIDO) ---
-                c_pdf, c_edit = st.columns(2)
-                c_pdf.download_button("📂 Gerar PDF Completo", gerar_pdf_op(op), f"OP_{op['numero_op']}.pdf",
-                                      key=f"pdf_btn_{op['id']}")
+                # --- 6. BOTÕES DE AÇÃO (PDF, EDITAR E EXCLUIR) ---
+                c_pdf, c_edit, c_del = st.columns(3)
 
-                if c_edit.button("✏️ Editar Ordem", key=f"edit_btn_{op['id']}"):
-                    # Inicialização completa da memória para evitar AttributeError
+                # Gerar PDF Individual
+                c_pdf.download_button(
+                    label="📂 Gerar PDF",
+                    data=gerar_pdf_op(op),
+                    file_name=f"OP_{op['numero_op']}.pdf",
+                    key=f"pdf_btn_{op['id']}",
+                    use_container_width=True
+                )
+
+                # Editar a OP
+                if c_edit.button("✏️ Editar", key=f"edit_btn_{op['id']}", use_container_width=True):
                     st.session_state.edit_op_id = op['id']
                     st.session_state.maq_atual = op['equipamento']
-
-                    # Carregamos as especificações técnicas salvas
                     specs_salvas = json.loads(op['info_adicionais_ficha'])
                     st.session_state.campos_dinamicos = specs_salvas
-
-                    # CORREÇÃO CRÍTICA: Definimos os nomes das especificações para o formulário
                     st.session_state.nomes_specs = list(specs_salvas.keys())
-
-                    # Abre o formulário
                     st.session_state.layout_confirmado = True
                     st.rerun()
 
+                # Excluir OP (Apenas ADM)
+                if st.session_state.nivel == "ADM":
+                    if c_del.button("🗑️ Excluir", key=f"del_op_{op['id']}", use_container_width=True):
+                        with sqlite3.connect('fabrica_master.db') as conn:
+                            conn.execute("DELETE FROM ordens WHERE id=?", (op['id'],))
+                        st.success("OP removida!")
+                        st.rerun()
+
             with t2:
-                # Checklist e acompanhamento seguem conforme seu original...
+                # Checklist
                 with sqlite3.connect('fabrica_master.db') as conn:
                     m = conn.execute("SELECT conjuntos FROM maquinas WHERE nome=?", (op['equipamento'],)).fetchone()
                 it = [i.strip() for i in m[0].split(",")] if m and m[0] else []
@@ -738,6 +745,28 @@ if menu == "📋 Lista de OPs":
                         conn.execute("UPDATE ordens SET progresso=?, checks_concluidos=? WHERE id=?",
                                      (p, "|".join(sel), op['id']))
                     st.rerun()
+
+            with t3:
+                # Acompanhamento (Logs)
+                logs = json.loads(op['acompanhamento_log'])
+                with st.form(f"chat_{op['id']}"):
+                    dst = st.selectbox("Para", cargos_chat)
+                    msg = st.text_area("Mensagem")
+                    if st.form_submit_button("Enviar"):
+                        logs.append({
+                            "cargo_destino": dst,
+                            "user_origem": st.session_state.user_logado,
+                            "data_inicio": datetime.now().strftime("%d/%m %H:%M"),
+                            "msg": msg,
+                            "status": "Pendente"
+                        })
+                        with sqlite3.connect('fabrica_master.db') as conn:
+                            conn.execute("UPDATE ordens SET acompanhamento_log=? WHERE id=?",
+                                         (json.dumps(logs), op['id']))
+                        st.rerun()
+
+                for l in reversed(logs):
+                    st.info(f"💬 **De:** {l['user_origem']} → **Para:** {l['cargo_destino']}\n\n{l['msg']}")
 
 
 # --- RELATÓRIO DINÂMICO COM GRÁFICO POR LÍDER ---
