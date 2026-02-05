@@ -268,25 +268,26 @@ if not st.session_state.auth:
                 st.error("Acesso negado.")
     st.stop()
 
-# --- LOGICA DE NAVEGAÇÃO UNIFICADA ---
+# --- LOGICA DE NAVEGAÇÃO UNIFICADA (CORREÇÃO DO REDIRECIONAMENTO) ---
 opcoes = ["📋 Lista de OPs", "📊 Relatório"]
 
-# ADM e PCP acessam tudo
-if st.session_state.nivel == "ADM":
+# 1. Define quem vê o menu Nova OP
+if st.session_state.nivel in ["ADM", "LIDER"]:
     opcoes.insert(1, "➕ Nova OP")
+
+# 2. Define quem vê Configurações
+if st.session_state.nivel == "ADM":
     opcoes.append("⚙️ Configurações")
 
-# LIDER agora também acessa 'Nova OP' permanentemente
-elif st.session_state.nivel == "LIDER":
-    opcoes.insert(1, "➕ Nova OP")
-    # Nota: Ele NÃO vê 'Configurações'
-
-# Controla para onde o usuário é levado ao clicar em Editar
+# --- O SEGREDO ESTÁ AQUI ---
+# Se o botão 'Editar' foi clicado, o edit_op_id não é mais None.
+# Então, forçamos o menu a selecionar a "➕ Nova OP" (que está no index 1).
 if st.session_state.edit_op_id is not None:
-    menu_index = 1 # Pula para 'Nova OP'
+    menu_index = opcoes.index("➕ Nova OP")
 else:
-    menu_index = 0 # Fica na 'Lista'
+    menu_index = 0
 
+# Cria o menu com o index dinâmico
 menu = st.sidebar.radio("Navegação", opcoes, index=menu_index, key="menu_principal")
 
 
@@ -444,58 +445,71 @@ if menu == "⚙️ Configurações":
 
 # --- Nova Op ---
 elif menu == "➕ Nova OP":
+    # 1. IDENTIFICAÇÃO DO MODO (EDIÇÃO OU NOVA)
     edit_mode = st.session_state.edit_op_id is not None
 
-    # 1. CARREGAMENTO DE DADOS
+    # Se estiver editando, carrega os dados do banco para a memória uma única vez
     if edit_mode and not st.session_state.layout_confirmado:
         with sqlite3.connect('fabrica_master.db') as conn:
             conn.row_factory = sqlite3.Row
-            op_data = conn.execute("SELECT * FROM ordens WHERE id=?", (st.session_state.edit_op_id,)).fetchone()
-            if op_data:
-                st.session_state.maq_atual = op_data['equipamento']
-                st.session_state.campos_dinamicos = json.loads(op_data['info_adicionais_ficha'])
+            res = conn.execute("SELECT * FROM ordens WHERE id=?", (st.session_state.edit_op_id,)).fetchone()
+            if res:
+                st.session_state.maq_atual = res['equipamento']
+                st.session_state.campos_dinamicos = json.loads(res['info_adicionais_ficha'])
                 st.session_state.nomes_specs = list(st.session_state.campos_dinamicos.keys())
                 st.session_state.layout_confirmado = True
 
     st.header("✏️ Editar Ficha Técnica" if edit_mode else "➕ Lançar Nova OP")
 
-    # --- PASSO 1: ESTRUTURA ---
+    # --- PASSO 1: ESTRUTURA DA FICHA ---
     if not st.session_state.layout_confirmado:
-        st.subheader("Passo 1: Estrutura")
-        if st.session_state.nivel == "ADM":
-            # Somente ADM altera nomes dos campos
-            for i, nome in enumerate(st.session_state.nomes_specs):
-                st.session_state.nomes_specs[i] = st.text_input(f"Campo {i + 1}", value=nome, key=f"s_{i}")
-        else:
-            st.warning("Você está em modo de edição de dados. A estrutura técnica é fixa.")
+        st.subheader("Passo 1: Definir Estrutura")
+        if 'nomes_specs' not in st.session_state:
+            st.session_state.nomes_specs = ["Alimentação", "Frascos", "Produto", "Bicos", "Produção", "Estrutura"]
 
-        if st.button("Ir para Dados ➡️"):
+        if st.session_state.nivel == "ADM":
+            for i, nome in enumerate(st.session_state.nomes_specs):
+                st.session_state.nomes_specs[i] = st.text_input(f"Campo {i + 1}", value=nome, key=f"struct_{i}")
+            if st.button("➕ Adicionar Campo Técnico"):
+                st.session_state.nomes_specs.append("Novo Campo")
+                st.rerun()
+        else:
+            st.info("A estrutura técnica é definida pelo PCP/ADM. Prossiga para os dados.")
+
+        with sqlite3.connect('fabrica_master.db') as conn:
+            maquinas = [m[0] for m in conn.execute("SELECT nome FROM maquinas").fetchall()]
+        st.session_state.maq_atual = st.selectbox("Selecione o Equipamento", maquinas)
+
+        if st.button("Confirmar e Ir para Dados ➡️"):
             st.session_state.layout_confirmado = True
             st.rerun()
 
-    # --- PASSO 2: PREENCHIMENTO ---
+    # --- PASSO 2: PREENCHIMENTO E SALVAMENTO ---
     else:
+        st.subheader(f"Passo 2: Dados da OP - {st.session_state.maq_atual}")
+
+        # Busca valores atuais se for edição
         val = {}
         if edit_mode:
             with sqlite3.connect('fabrica_master.db') as conn:
                 conn.row_factory = sqlite3.Row
-                res = conn.execute("SELECT * FROM ordens WHERE id=?", (st.session_state.edit_op_id,)).fetchone()
-                if res: val = dict(res)
+                row = conn.execute("SELECT * FROM ordens WHERE id=?", (st.session_state.edit_op_id,)).fetchone()
+                if row: val = dict(row)
 
-        with st.form("form_dados_op"):
-            st.markdown("### 📄 Informações e Cronograma")
+        with st.form("form_final"):
+            st.markdown("### 📄 Cabeçalho")
             c1, c2, c3 = st.columns(3)
             f_op = c1.text_input("Nº OP", value=val.get('numero_op', ""))
             f_cli = c2.text_input("Cliente", value=val.get('cliente', ""))
 
-            # Data de entrega (O que o Líder mais precisa mudar)
-            d_atual = date.today()
+            # Data de Entrega
+            d_ent = date.today()
             if val.get('data_entrega'):
                 try:
-                    d_atual = datetime.strptime(val.get('data_entrega'), '%Y-%m-%d').date()
+                    d_ent = datetime.strptime(val.get('data_entrega'), '%Y-%m-%d').date()
                 except:
                     pass
-            f_entrega = st.date_input("Data de Entrega", value=d_atual)
+            f_entrega = st.date_input("Data de Entrega", value=d_ent)
 
             st.markdown("### 🛠️ Especificações Técnicas")
             g3 = st.columns(3)
@@ -504,30 +518,50 @@ elif menu == "➕ Nova OP":
                 v_pre = st.session_state.campos_dinamicos.get(nome, "")
                 specs_finais[nome] = g3[i % 3].text_input(nome, value=v_pre)
 
-            st.markdown("### 🏢 Distribuição Interna")
+            st.markdown("### 🏢 Distribuição e Fábrica")
             d1, d2, d3, d4 = st.columns(4)
             f_revi = d1.text_input("Revisor", value=val.get('dist_revisor', ""))
             f_pcp = d2.text_input("PCP", value=val.get('dist_pcp', ""))
             f_proj = d3.text_input("Projeto", value=val.get('dist_projeto', ""))
             f_mont = d4.text_input("Montagem", value=val.get('dist_montagem', ""))
 
-            if st.form_submit_button("💾 SALVAR ALTERAÇÕES"):
+            f_info = st.text_area("Observações Adicionais", value=val.get('ast_instalacao', ""))
+
+            # BOTÃO SALVAR
+            submit = st.form_submit_button("💾 SALVAR ALTERAÇÕES" if edit_mode else "✅ FINALIZAR E CRIAR OP")
+
+            if submit:
                 with sqlite3.connect('fabrica_master.db') as conn:
                     specs_json = json.dumps(specs_finais)
-                    conn.execute("""UPDATE ordens SET 
-                        numero_op=?, cliente=?, data_entrega=?, dist_revisor=?, 
-                        dist_pcp=?, dist_projeto=?, dist_montagem=?, info_adicionais_ficha=? 
-                        WHERE id=?""",
-                                 (f_op, f_cli, str(f_entrega), f_revi, f_pcp, f_proj, f_mont, specs_json,
-                                  st.session_state.edit_op_id))
 
-                # Reseta tudo e volta para a lista
+                    if edit_mode:
+                        # COMANDO DE EDIÇÃO (UPDATE)
+                        conn.execute("""UPDATE ordens SET 
+                            numero_op=?, cliente=?, data_entrega=?, dist_revisor=?, 
+                            dist_pcp=?, dist_projeto=?, dist_montagem=?, 
+                            ast_instalacao=?, info_adicionais_ficha=? 
+                            WHERE id=?""",
+                                     (f_op, f_cli, str(f_entrega), f_revi, f_pcp, f_proj, f_mont,
+                                      f_info, specs_json, st.session_state.edit_op_id))
+                        st.success("✅ Ficha Técnica atualizada com sucesso!")
+                    else:
+                        # COMANDO DE CRIAÇÃO (INSERT)
+                        conn.execute("""INSERT INTO ordens (
+                            numero_op, cliente, data_entrega, dist_revisor, dist_pcp, 
+                            dist_projeto, dist_montagem, ast_instalacao, info_adicionais_ficha,
+                            data_op, equipamento, progresso, status
+                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                     (f_op, f_cli, str(f_entrega), f_revi, f_pcp, f_proj, f_mont,
+                                      f_info, specs_json, str(date.today()), st.session_state.maq_atual, 0,
+                                      'Em Produção'))
+                        st.success("🚀 Nova OP criada com sucesso!")
+
+                # LIMPEZA DE MEMÓRIA E REDIRECIONAMENTO
                 st.session_state.edit_op_id = None
                 st.session_state.layout_confirmado = False
-                st.success("Ficha atualizada!")
                 st.rerun()
 
-        if st.button("⬅️ Cancelar"):
+        if st.button("⬅️ Cancelar e Voltar"):
             st.session_state.edit_op_id = None
             st.session_state.layout_confirmado = False
             st.rerun()
@@ -784,6 +818,7 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Nenhuma OP em andamento para gerar relatório.")
+
 
 
 
