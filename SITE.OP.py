@@ -790,7 +790,3 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Nenhuma OP em andamento para gerar relatório.")
-
-
-
-
