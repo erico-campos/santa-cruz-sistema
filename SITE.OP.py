@@ -445,10 +445,9 @@ if menu == "⚙️ Configurações":
 
 # --- Nova Op ---
 elif menu == "➕ Nova OP":
-    # 1. IDENTIFICAÇÃO DO MODO (EDIÇÃO OU NOVA)
     edit_mode = st.session_state.edit_op_id is not None
 
-    # Se estiver editando, carrega os dados do banco para a memória uma única vez
+    # 1. CARREGAMENTO DE DADOS PARA EDIÇÃO
     if edit_mode and not st.session_state.layout_confirmado:
         with sqlite3.connect('fabrica_master.db') as conn:
             conn.row_factory = sqlite3.Row
@@ -461,34 +460,40 @@ elif menu == "➕ Nova OP":
 
     st.header("✏️ Editar Ficha Técnica" if edit_mode else "➕ Lançar Nova OP")
 
-    # --- PASSO 1: ESTRUTURA DA FICHA ---
+    # --- PASSO 1: ESTRUTURA TÉCNICA (DINÂMICA) ---
     if not st.session_state.layout_confirmado:
-        st.subheader("Passo 1: Definir Estrutura")
+        st.subheader("Passo 1: Definir Especificações da Máquina")
+        st.info("Adicione ou remova campos conforme a necessidade deste equipamento.")
+
         if 'nomes_specs' not in st.session_state:
-            st.session_state.nomes_specs = ["Alimentação", "Frascos", "Produto", "Bicos", "Produção", "Estrutura"]
+            st.session_state.nomes_specs = ["Alimentação", "Frasco", "Amostra", "Bicos", "Produto", "Estrutura"]
 
-        if st.session_state.nivel == "ADM":
-            for i, nome in enumerate(st.session_state.nomes_specs):
-                st.session_state.nomes_specs[i] = st.text_input(f"Campo {i + 1}", value=nome, key=f"struct_{i}")
-            if st.button("➕ Adicionar Campo Técnico"):
-                st.session_state.nomes_specs.append("Novo Campo")
+        # Interface para incluir/excluir especificações
+        for i, nome in enumerate(st.session_state.nomes_specs):
+            c_ed1, c_ed2 = st.columns([5, 1])
+            st.session_state.nomes_specs[i] = c_ed1.text_input(f"Especificação {i + 1}", value=nome,
+                                                               key=f"spec_name_{i}")
+            if c_ed2.button("🗑️", key=f"del_spec_{i}"):
+                st.session_state.nomes_specs.pop(i)
                 st.rerun()
-        else:
-            st.info("A estrutura técnica é definida pelo PCP/ADM. Prossiga para os dados.")
 
+        if st.button("➕ Incluir Mais Especificações"):
+            st.session_state.nomes_specs.append("Novo Campo")
+            st.rerun()
+
+        st.divider()
         with sqlite3.connect('fabrica_master.db') as conn:
-            maquinas = [m[0] for m in conn.execute("SELECT nome FROM maquinas").fetchall()]
-        st.session_state.maq_atual = st.selectbox("Selecione o Equipamento", maquinas)
+            maqs = [m[0] for m in conn.execute("SELECT nome FROM maquinas").fetchall()]
+        st.session_state.maq_atual = st.selectbox("Selecione o Equipamento Base", maqs)
 
-        if st.button("Confirmar e Ir para Dados ➡️"):
+        if st.button("Ir para Preenchimento de Dados ➡️"):
             st.session_state.layout_confirmado = True
             st.rerun()
 
-    # --- PASSO 2: PREENCHIMENTO E SALVAMENTO ---
+    # --- PASSO 2: PREENCHIMENTO COMPLETO ---
     else:
-        st.subheader(f"Passo 2: Dados da OP - {st.session_state.maq_atual}")
+        st.subheader(f"Passo 2: Detalhes da OP - {st.session_state.maq_atual}")
 
-        # Busca valores atuais se for edição
         val = {}
         if edit_mode:
             with sqlite3.connect('fabrica_master.db') as conn:
@@ -496,72 +501,97 @@ elif menu == "➕ Nova OP":
                 row = conn.execute("SELECT * FROM ordens WHERE id=?", (st.session_state.edit_op_id,)).fetchone()
                 if row: val = dict(row)
 
-        with st.form("form_final"):
-            st.markdown("### 📄 Cabeçalho")
+        with st.form("form_op_completa"):
+            # BLOCO 1: DADOS DA OP
+            st.markdown("#### 📄 Dados da Ordem de Produção")
             c1, c2, c3 = st.columns(3)
-            f_op = c1.text_input("Nº OP", value=val.get('numero_op', ""))
+            f_op = c1.text_input("N° OP", value=val.get('numero_op', ""))
             f_cli = c2.text_input("Cliente", value=val.get('cliente', ""))
+            f_data_op = c3.date_input("Data da OP", value=date.today())
 
-            # Data de Entrega
-            d_ent = date.today()
-            if val.get('data_entrega'):
-                try:
-                    d_ent = datetime.strptime(val.get('data_entrega'), '%Y-%m-%d').date()
-                except:
-                    pass
-            f_entrega = st.date_input("Data de Entrega", value=d_ent)
+            c4, c5 = st.columns(2)
+            f_entrega = c4.date_input("Data de Entrega",
+                                      value=date.today() if not val.get('data_entrega') else datetime.strptime(
+                                          val.get('data_entrega'), '%Y-%m-%d').date())
+            f_vend_op = c5.text_input("Vendedor (OP)", value=val.get('vendedor', ""))
 
-            st.markdown("### 🛠️ Especificações Técnicas")
-            g3 = st.columns(3)
+            # BLOCO 2: DADOS DO CLIENTE
+            st.markdown("#### 👥 Dados do Cliente")
+            cc1, cc2 = st.columns(2)
+            f_cnpj = cc1.text_input("CNPJ", value=val.get('cnpj', ""))
+            f_end = cc2.text_input("Endereço Completo", value=val.get('exp_endereco', ""))
+
+            # BLOCO 3: ESPECIFICAÇÕES TÉCNICAS (DINÂMICAS)
+            st.markdown("#### 🛠️ Especificações da Máquina")
+            g_specs = st.columns(3)
             specs_finais = {}
             for i, nome in enumerate(st.session_state.nomes_specs):
                 v_pre = st.session_state.campos_dinamicos.get(nome, "")
-                specs_finais[nome] = g3[i % 3].text_input(nome, value=v_pre)
+                specs_finais[nome] = g_specs[i % 3].text_input(nome, value=v_pre)
 
-            st.markdown("### 🏢 Distribuição e Fábrica")
-            d1, d2, d3, d4 = st.columns(4)
-            f_revi = d1.text_input("Revisor", value=val.get('dist_revisor', ""))
-            f_pcp = d2.text_input("PCP", value=val.get('dist_pcp', ""))
-            f_proj = d3.text_input("Projeto", value=val.get('dist_projeto', ""))
-            f_mont = d4.text_input("Montagem", value=val.get('dist_montagem', ""))
+            # BLOCO 4: DADOS DA ESTEIRA
+            st.markdown("#### 🚛 Dados da Esteira")
+            e1, e2, e3, e4, e5 = st.columns(5)
+            f_mat = e1.text_input("Material", value=val.get('est_material', ""))
+            f_alt = e2.text_input("Altura", value=val.get('est_altura', ""))
+            f_com = e3.text_input("Comprimento", value=val.get('est_comprimento', ""))
+            f_lar = e4.text_input("Largura", value=val.get('est_largura', ""))
+            f_pla = e5.text_input("Plataforma", value=val.get('est_plataforma', ""))
 
-            f_info = st.text_area("Observações Adicionais", value=val.get('ast_instalacao', ""))
+            # BLOCO 5: DISTRIBUIÇÃO INTERNA
+            st.markdown("#### 🏢 Distribuição Interna")
+            d1, d2, d3 = st.columns(3)
+            f_dist_vend = d1.text_input("Vendedor (Distribuição)", value=val.get('dist_vendedor', ""))
+            f_revi = d2.text_input("Revisor", value=val.get('dist_revisor', ""))
+            f_pcp = d3.text_input("PCP", value=val.get('dist_pcp', ""))
 
-            # BOTÃO SALVAR
-            submit = st.form_submit_button("💾 SALVAR ALTERAÇÕES" if edit_mode else "✅ FINALIZAR E CRIAR OP")
+            d4, d5, d6 = st.columns(3)
+            f_proj = d4.text_input("Projeto", value=val.get('dist_projeto', ""))
+            f_elet = d5.text_input("Elétrica", value=val.get('dist_eletrica', ""))
+            f_mont = d6.text_input("Montagem", value=val.get('dist_montagem', ""))
+
+            st.markdown("#### 📝 Finalização")
+            f_info = st.text_area("Informações Adicionais", value=val.get('ast_instalacao', ""))
+
+            with sqlite3.connect('fabrica_master.db') as conn:
+                lista_lideres = [s[0] for s in conn.execute("SELECT nome FROM setores").fetchall()]
+            f_lider = st.selectbox("Líder do Setor (Responsável)", lista_lideres)
+
+            # SALVAMENTO
+            submit = st.form_submit_button("💾 SALVAR E FINALIZAR OP")
 
             if submit:
                 with sqlite3.connect('fabrica_master.db') as conn:
                     specs_json = json.dumps(specs_finais)
-
                     if edit_mode:
-                        # COMANDO DE EDIÇÃO (UPDATE)
                         conn.execute("""UPDATE ordens SET 
-                            numero_op=?, cliente=?, data_entrega=?, dist_revisor=?, 
-                            dist_pcp=?, dist_projeto=?, dist_montagem=?, 
-                            ast_instalacao=?, info_adicionais_ficha=? 
-                            WHERE id=?""",
-                                     (f_op, f_cli, str(f_entrega), f_revi, f_pcp, f_proj, f_mont,
-                                      f_info, specs_json, st.session_state.edit_op_id))
-                        st.success("✅ Ficha Técnica atualizada com sucesso!")
+                            numero_op=?, cliente=?, data_op=?, data_entrega=?, vendedor=?, 
+                            cnpj=?, exp_endereco=?, info_adicionais_ficha=?, 
+                            est_material=?, est_altura=?, est_comprimento=?, est_largura=?, est_plataforma=?,
+                            dist_vendedor=?, dist_revisor=?, dist_pcp=?, dist_projeto=?, dist_eletrica=?, dist_montagem=?,
+                            ast_instalacao=?, responsavel_setor=? WHERE id=?""",
+                                     (f_op, f_cli, str(f_data_op), str(f_entrega), f_vend_op, f_cnpj, f_end, specs_json,
+                                      f_mat, f_alt, f_com, f_lar, f_pla, f_dist_vend, f_revi, f_pcp, f_proj, f_elet,
+                                      f_mont,
+                                      f_info, f_lider, st.session_state.edit_op_id))
                     else:
-                        # COMANDO DE CRIAÇÃO (INSERT)
                         conn.execute("""INSERT INTO ordens (
-                            numero_op, cliente, data_entrega, dist_revisor, dist_pcp, 
-                            dist_projeto, dist_montagem, ast_instalacao, info_adicionais_ficha,
-                            data_op, equipamento, progresso, status
-                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                     (f_op, f_cli, str(f_entrega), f_revi, f_pcp, f_proj, f_mont,
-                                      f_info, specs_json, str(date.today()), st.session_state.maq_atual, 0,
-                                      'Em Produção'))
-                        st.success("🚀 Nova OP criada com sucesso!")
+                            numero_op, cliente, data_op, data_entrega, vendedor, cnpj, exp_endereco, 
+                            info_adicionais_ficha, est_material, est_altura, est_comprimento, est_largura, est_plataforma,
+                            dist_vendedor, dist_revisor, dist_pcp, dist_projeto, dist_eletrica, dist_montagem,
+                            ast_instalacao, responsavel_setor, equipamento, progresso, status
+                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                     (f_op, f_cli, str(f_data_op), str(f_entrega), f_vend_op, f_cnpj, f_end, specs_json,
+                                      f_mat, f_alt, f_com, f_lar, f_pla, f_dist_vend, f_revi, f_pcp, f_proj, f_elet,
+                                      f_mont,
+                                      f_info, f_lider, st.session_state.maq_atual, 0, 'Em Produção'))
 
-                # LIMPEZA DE MEMÓRIA E REDIRECIONAMENTO
                 st.session_state.edit_op_id = None
                 st.session_state.layout_confirmado = False
+                st.success("OP salva com sucesso!")
                 st.rerun()
 
-        if st.button("⬅️ Cancelar e Voltar"):
+        if st.button("⬅️ Cancelar"):
             st.session_state.edit_op_id = None
             st.session_state.layout_confirmado = False
             st.rerun()
@@ -792,4 +822,6 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Nenhuma OP em andamento para gerar relatório.")
+
+
 
