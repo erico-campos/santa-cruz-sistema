@@ -58,12 +58,101 @@ def iniciar_banco():
 iniciar_banco()
 
 # --- FUNÇÃO PDF PROFISSIONAL (REVISADA E CORRIGIDA) ---
+def gerar_pdf_relatorio_geral(df_relatorio):
+    buffer = BytesIO()
+    # Configuração da Folha A4 em pé
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1 * cm,
+        leftMargin=1 * cm,
+        topMargin=1 * cm,
+        bottomMargin=1 * cm
+    )
+
+    elementos = []
+    styles = getSampleStyleSheet()
+
+    # Estilo para o texto dentro das células (evita invasão de coluna)
+    estilo_celula = ParagraphStyle(
+        'CelTab',
+        parent=styles['Normal'],
+        fontSize=8,
+        leading=10,
+        alignment=1  # Centralizado
+    )
+
+    # Estilo para o título do responsável
+    estilo_responsavel = ParagraphStyle(
+        'Resp',
+        parent=styles['Normal'],
+        fontSize=12,
+        alignment=1,
+        spaceAfter=20
+    )
+
+    # --- CABEÇALHO DO RELATÓRIO ---
+    responsavel = st.session_state.user_logado
+    titulo = Paragraph("<b>MAPA GERAL DE PRODUÇÃO - SANTA CRUZ</b>", styles['Title'])
+    sub_titulo = Paragraph(f"Responsável: {responsavel} | Data: {datetime.now().strftime('%d/%m/%Y')}",
+                           estilo_responsavel)
+
+    elementos.append(titulo)
+    elementos.append(sub_titulo)
+    elementos.append(Spacer(1, 0.5 * cm))
+
+    # --- MONTAGEM DA TABELA ---
+    # Usamos Paragraph no cabeçalho também para manter o padrão
+    dados_tabela = [[
+        Paragraph("<b>Nº OP</b>", estilo_celula),
+        Paragraph("<b>Cliente</b>", estilo_celula),
+        Paragraph("<b>Máquina</b>", estilo_celula),
+        Paragraph("<b>Líder</b>", estilo_celula),
+        Paragraph("<b>Entrega</b>", estilo_celula),
+        Paragraph("<b>Status</b>", estilo_celula)
+    ]]
+
+    # Conteúdo vindo do DataFrame
+    for _, linha in df_relatorio.iterrows():
+        dados_tabela.append([
+            Paragraph(str(linha['Nº OP']), estilo_celula),
+            Paragraph(str(linha['Cliente']), estilo_celula),
+            Paragraph(str(linha['Máquina']), estilo_celula),
+            Paragraph(str(linha['Líder']), estilo_celula),
+            Paragraph(str(linha['Entrega']), estilo_celula),
+            Paragraph(f"{linha['Progresso %']}%", estilo_celula)
+        ])
+
+    # Estilo Visual da Tabela
+    estilo_tab = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1A242F")),  # Fundo azul marinho
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ])
+
+    # Distribuição das Larguras (Total 19cm)
+    # OP(2.2) + Cliente(5.8) + Máquina(4.0) + Líder(3.5) + Entrega(2.0) + Status(1.5)
+    t = Table(dados_tabela, colWidths=[2.2 * cm, 5.8 * cm, 4.0 * cm, 3.5 * cm, 2.0 * cm, 1.5 * cm])
+    t.setStyle(estilo_tab)
+    elementos.append(t)
+
+    # Rodapé simples
+    elementos.append(Spacer(1, 1 * cm))
+    elementos.append(
+        Paragraph(f"<center><font size=8>Relatório gerado automaticamente pelo Sistema Santa Cruz</font></center>",
+                  styles['Normal']))
+
+    doc.build(elementos)
+    return buffer.getvalue()
 
 
 def gerar_pdf_op(op_raw):
-    # Converte o objeto do banco em um dicionário real para evitar erros de 'get'
     op = dict(op_raw)
-
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -78,153 +167,79 @@ def gerar_pdf_op(op_raw):
     styles = getSampleStyleSheet()
 
     # --- CONFIGURAÇÃO DE ESTILOS ---
-    cor_fundo_faixa = colors.HexColor("#1A242F")  # Azul Marinho Escuro
-    cor_borda = colors.HexColor("#BDC3C7")  # Cinza Profissional
+    cor_fundo_faixa = colors.HexColor("#1A242F")
+    cor_borda = colors.HexColor("#BDC3C7")
 
-    estilo_titulo_doc = ParagraphStyle(
-        'TituloDoc', parent=styles['Heading1'], fontSize=22, alignment=1, spaceAfter=25, textColor=cor_fundo_faixa
+    estilo_titulo_op = ParagraphStyle(
+        'TituloOP', parent=styles['Heading1'], fontSize=22, alignment=1, spaceAfter=5, textColor=cor_fundo_faixa
     )
 
-    estilo_secao = ParagraphStyle(
-        'Secao', parent=styles['Heading2'], fontSize=15,
-        backColor=cor_fundo_faixa, borderPadding=8, spaceBefore=0, spaceAfter=10, borderRadius=2
+    estilo_sub_lider = ParagraphStyle(
+        'SubLider', parent=styles['Normal'], fontSize=12, alignment=1, spaceAfter=20, textColor=colors.black
     )
 
     estilo_item = ParagraphStyle(
-        'ItemTexto', parent=styles['Normal'], fontSize=12, leading=16, textColor=colors.black
+        'ItemTexto', parent=styles['Normal'], fontSize=11, leading=14
     )
 
-    estilo_tabela = TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.8, cor_borda),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('BACKGROUND', (0, 0), (-1, -1), colors.white),
-    ])
-
-    def titulo_branco(texto):
-        return Paragraph(f'<font color="white"><b>{texto}</b></font>', estilo_secao)
-
     # --- INÍCIO DO CONTEÚDO ---
-    elementos.append(Paragraph(f"ORDEM DE PRODUÇÃO - {op.get('numero_op', 'N/A')}", estilo_titulo_doc))
+    # Título Principal: Número da OP
+    elementos.append(Paragraph(f"ORDEM DE PRODUÇÃO: {op.get('numero_op', 'N/A')}", estilo_titulo_op))
 
-    # --- 1. DADOS DO CLIENTE E PROJETO ---
-    bloco1 = []
-    bloco1.append(titulo_branco("1. DADOS DO CLIENTE E PROJETO"))
+    # Subtítulo: Líder Responsável (Identificação de quem a OP pertence)
+    lider = op.get('responsavel_setor', 'NÃO DEFINIDO')
+    elementos.append(Paragraph(f"Líder Responsável: <b>{lider.upper()}</b>", estilo_sub_lider))
+
+    elementos.append(Spacer(1, 0.5 * cm))
+
+    # --- TABELA DE DADOS DO PROJETO ---
     dados_p = [
         [Paragraph(f"<b>CLIENTE:</b><br/>{op.get('cliente', '')}", estilo_item),
          Paragraph(f"<b>EQUIPAMENTO:</b><br/>{op.get('equipamento', '')}", estilo_item)],
         [Paragraph(f"<b>CNPJ:</b><br/>{op.get('cnpj', '')}", estilo_item),
-         Paragraph(f"<b>LÍDER RESPONSÁVEL:</b><br/>{op.get('responsavel_setor', '')}", estilo_item)],
-        [Paragraph(f"<b>DATA EMISSÃO:</b><br/>{op.get('data_op', '')}", estilo_item),
          Paragraph(f"<b>DATA ENTREGA:</b><br/>{op.get('data_entrega', '')}", estilo_item)]
     ]
+
     t1 = Table(dados_p, colWidths=[9 * cm, 9 * cm])
-    t1.setStyle(estilo_tabela)
-    bloco1.append(t1)
-    elementos.append(KeepTogether(bloco1))
+    t1.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.8, cor_borda),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    elementos.append(t1)
     elementos.append(Spacer(1, 0.8 * cm))
 
-    # --- 2. ESPECIFICAÇÕES TÉCNICAS (DINÂMICAS) ---
-    bloco2 = []
-    bloco2.append(titulo_branco("2. ESPECIFICAÇÕES TÉCNICAS"))
+    # --- ESPECIFICAÇÕES TÉCNICAS (DINÂMICAS) ---
+    elementos.append(
+        Paragraph(f'<font color="white" backColor="{cor_fundo_faixa}"><b>  ESPECIFICAÇÕES TÉCNICAS</b></font>',
+                  styles['Heading2']))
     try:
         specs = json.loads(op.get('info_adicionais_ficha', '{}'))
-        itens_tec = [Paragraph(f"<b>{k.upper()}:</b><br/>{v}", estilo_item) for k, v in specs.items()]
         data_tec = []
-        for i in range(0, len(itens_tec), 2):
-            row = [itens_tec[i], itens_tec[i + 1] if i + 1 < len(itens_tec) else ""]
-            data_tec.append(row)
+        itens_temp = []
+        for k, v in specs.items():
+            itens_temp.append(Paragraph(f"<b>{k}:</b> {v}", estilo_item))
+            if len(itens_temp) == 2:
+                data_tec.append(itens_temp)
+                itens_temp = []
+        if itens_temp:
+            itens_temp.append("")
+            data_tec.append(itens_temp)
+
         if data_tec:
             t2 = Table(data_tec, colWidths=[9 * cm, 9 * cm])
-            t2.setStyle(estilo_tabela)
-            bloco2.append(t2)
-            elementos.append(KeepTogether(bloco2))
-            elementos.append(Spacer(1, 0.8 * cm))
+            t2.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, cor_borda), ('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+            elementos.append(t2)
     except:
-        elementos.append(Paragraph("Erro ao carregar especificações técnicas.", estilo_item))
-
-    # --- 3. LOGÍSTICA E DISTRIBUIÇÃO ---
-    bloco3 = []
-    bloco3.append(titulo_branco("3. LOGÍSTICA E DISTRIBUIÇÃO"))
-    log_data = [
-        [Paragraph(f"<b>MATERIAL:</b> {op.get('est_material', '')}", estilo_item),
-         Paragraph(f"<b>ALTURA:</b> {op.get('est_altura', '')}", estilo_item)],
-        [Paragraph(f"<b>COMPRIMENTO:</b> {op.get('est_comprimento', '')}", estilo_item),
-         Paragraph(f"<b>LARGURA:</b> {op.get('est_largura', '')}", estilo_item)],
-        [Paragraph(f"<b>VENDEDOR:</b> {op.get('dist_vendedor', '')}", estilo_item),
-         Paragraph(f"<b>PCP:</b> {op.get('dist_pcp', '')}", estilo_item)],
-        [Paragraph(f"<b>REVISOR:</b> {op.get('dist_revisor', '')}", estilo_item),
-         Paragraph(f"<b>PROJETO:</b> {op.get('dist_projeto', '')}", estilo_item)],
-        [Paragraph(f"<b>ELÉTRICA:</b> {op.get('dist_eletrica', '')}", estilo_item),
-         Paragraph(f"<b>MONTAGEM:</b> {op.get('dist_montagem', '')}", estilo_item)]
-    ]
-    t3 = Table(log_data, colWidths=[9 * cm, 9 * cm])
-    t3.setStyle(estilo_tabela)
-    bloco3.append(t3)
-
-    t3_obs = Table([
-        [Paragraph(f"<b>ENDEREÇO DE ENTREGA:</b><br/>{op.get('exp_endereco', '')}", estilo_item)],
-        [Paragraph(f"<b>ASSISTÊNCIA / INSTALAÇÃO:</b><br/>{op.get('ast_instalacao', '')}", estilo_item)]
-    ], colWidths=[18 * cm])
-    t3_obs.setStyle(estilo_tabela)
-    bloco3.append(t3_obs)
-
-    elementos.append(KeepTogether(bloco3))
-    elementos.append(Spacer(1, 0.8 * cm))
-
-    # --- 4. ANEXO FOTOGRÁFICO ---
-    if op.get('anexo'):
-        caminho_foto = os.path.join("anexos", op['anexo'])
-        if os.path.exists(caminho_foto):
-            ext = op['anexo'].split(".")[-1].lower()
-            if ext in ["png", "jpg", "jpeg"]:
-                from reportlab.platypus import Image
-                elementos.append(PageBreak())
-                elementos.append(titulo_branco("4. ANEXO FOTOGRÁFICO"))
-                elementos.append(Spacer(1, 0.5 * cm))
-
-                img = Image(caminho_foto)
-                largura_max = 16 * cm
-                proporcao = largura_max / img.drawWidth
-                img.drawWidth = largura_max
-                img.drawHeight = img.drawHeight * proporcao
-
-                elementos.append(img)
-                elementos.append(Paragraph(f"<center>Arquivo: {op['anexo']}</center>", estilo_item))
-
-    # --- 5. HISTÓRICO DE ACOMPANHAMENTO ---
-    elementos.append(PageBreak())
-    elementos.append(titulo_branco("5. HISTÓRICO DE ACOMPANHAMENTO"))
-    try:
-        logs = json.loads(op.get('acompanhamento_log', '[]'))
-        if not logs:
-            elementos.append(Paragraph("Nenhum registro encontrado.", estilo_item))
-        else:
-            for l in logs:
-                chat_data = [
-                    [Paragraph(
-                        f"<b>De: {l.get('user_origem', '')} para {l.get('cargo_destino', '')}</b> ({l.get('data_inicio', '')})",
-                        estilo_item)],
-                    [Paragraph(f"<i>Mensagem:</i> {l.get('msg', '')}", estilo_item)]
-                ]
-                for h in l.get('historico_conversa', []):
-                    chat_data.append([Paragraph(f"&nbsp;&nbsp;&nbsp;↪ <b>{h['autor']}:</b> {h['texto']}", estilo_item)])
-
-                t_log = Table(chat_data, colWidths=[18 * cm])
-                t_log.setStyle(estilo_tabela)
-                elementos.append(t_log)
-                elementos.append(Spacer(1, 0.4 * cm))
-    except:
-        elementos.append(Paragraph("Erro ao carregar histórico.", estilo_item))
+        elementos.append(Paragraph("Erro nas especificações.", estilo_item))
 
     doc.build(elementos)
     return buffer.getvalue()
 
 # --- LOGIN ---
 if not st.session_state.auth:
-    st.title("🏭 Login - ERP Produção Master")
+    st.title("🏭 Login - Santa Cruz Produção Master")
     with sqlite3.connect('fabrica_master.db') as conn:
         res_c = conn.execute("SELECT DISTINCT cargo FROM usuarios").fetchall()
         cargos = [c[0] for c in res_c]
@@ -252,15 +267,12 @@ if not st.session_state.auth:
     st.stop()
 
 # --- NAVEGAÇÃO COM REDIRECIONAMENTO ---
-
 opcoes = ["📋 Lista de OPs", "📊 Relatório"]
 if st.session_state.nivel == "ADM":
     opcoes.insert(1, "➕ Nova OP")
     opcoes.append("⚙️ Configurações")
 
-
 # Lógica para mudar de página sozinho ao editar
-
 if st.session_state.edit_op_id is not None:
     menu_index = 1  # Índice da "➕ Nova OP"
 else:
@@ -429,133 +441,149 @@ if menu == "⚙️ Configurações":
                         with sqlite3.connect('fabrica_master.db') as conn:
                             conn.execute("DELETE FROM usuarios WHERE id=?", (u['id'],))
                         st.rerun()
+
 elif menu == "➕ Nova OP":
-    # --- LÓGICA DE CARREGAMENTO PARA EDIÇÃO ---
     edit_mode = st.session_state.edit_op_id is not None
 
-    # Se entrou em modo edição e ainda não confirmou layout, fazemos isso automaticamente
+    # 1. CARREGAMENTO DOS DADOS PARA EDIÇÃO (FOCO TOTAL NA OP EXISTENTE)
     if edit_mode and not st.session_state.layout_confirmado:
         with sqlite3.connect('fabrica_master.db') as conn:
             conn.row_factory = sqlite3.Row
             op_para_editar = conn.execute("SELECT * FROM ordens WHERE id=?", (st.session_state.edit_op_id,)).fetchone()
             if op_para_editar:
-                # Carregamos a máquina e as especificações técnicas (JSON)
+                # Carrega a máquina e as especificações EXATAS que foram salvas na OP
                 st.session_state.maq_atual = op_para_editar['equipamento']
                 st.session_state.campos_dinamicos = json.loads(op_para_editar['info_adicionais_ficha'])
+                # Seta os nomes das especificações para o Passo 1 refletir a realidade da OP
+                st.session_state.nomes_specs = list(st.session_state.campos_dinamicos.keys())
                 st.session_state.layout_confirmado = True
 
     st.header("✏️ Editar Ordem de Produção" if edit_mode else "➕ Lançar Nova OP")
 
-    with sqlite3.connect('fabrica_master.db') as conn:
-        conn.row_factory = sqlite3.Row
-        maqs = pd.read_sql_query("SELECT nome FROM maquinas", conn)['nome'].tolist()
-        sets = pd.read_sql_query("SELECT nome FROM setores", conn)['nome'].tolist()
-        mods_df = pd.read_sql_query("SELECT * FROM modelos_op", conn)
-
-    # --- PASSO 1: SELEÇÃO E LAYOUT (SÓ APARECE SE NÃO FOR EDIÇÃO) ---
+    # --- PASSO 1: DEFINIÇÃO DA ESTRUTURA (SÓ MUDA SE VOCÊ QUISER) ---
     if not st.session_state.layout_confirmado:
-        st.subheader("Passo 1: Seleção e Layout")
-        # ... (seu código de seleção de máquina e atalhos permanece igual aqui)
-        maq_sel = st.selectbox("Máquina Principal", [""] + maqs)
-        # (Código dos atalhos e personalização omitido para brevidade, mantenha o que você já tem)
-        if st.button("✅ CONFIRMAR E ABRIR FORMULÁRIO"):
-            if maq_sel:
-                st.session_state.layout_confirmado, st.session_state.maq_atual = True, maq_sel
+        st.subheader("Passo 1: Definir Estrutura da Ficha")
+        # Se for nova OP, inicializa com os nomes padrões se estiver vazio
+        if 'nomes_specs' not in st.session_state or not st.session_state.nomes_specs:
+            st.session_state.nomes_specs = ["Alimentação", "Frascos", "Produto", "Bicos", "Produção", "Estrutura"]
+
+        for i, nome_atual in enumerate(st.session_state.nomes_specs):
+            c_ed1, c_ed2 = st.columns([5, 1])
+            novo_nome = c_ed1.text_input(f"Campo {i + 1}", value=nome_atual, key=f"n_spec_{i}")
+            st.session_state.nomes_specs[i] = novo_nome
+            if c_ed2.button("🗑️", key=f"del_spec_{i}"):
+                st.session_state.nomes_specs.pop(i)
                 st.rerun()
 
-    # --- PASSO 2: FORMULÁRIO DE REGISTRO / EDIÇÃO ---
+        if st.button("➕ Adicionar Novo Campo"):
+            st.session_state.nomes_specs.append("Novo Campo")
+            st.rerun()
+
+        st.divider()
+        if st.button("Confirmar Estrutura e Ir para Dados ➡️"):
+            st.session_state.layout_confirmado = True
+            st.rerun()
+
+    # --- PASSO 2: EDIÇÃO DOS CONTEÚDOS DA OP ---
+
     else:
-        # Se for edição, buscamos os valores atuais para preencher os campos
+        st.subheader(f"Passo 2: Conteúdo da OP - {st.session_state.maq_atual}")
+
+        # Garantia de inicialização
+        if 'nomes_specs' not in st.session_state:
+            st.session_state.nomes_specs = ["Alimentação", "Frascos", "Produto", "Bicos", "Produção", "Estrutura"]
+
         val = {}
         if edit_mode:
             with sqlite3.connect('fabrica_master.db') as conn:
                 conn.row_factory = sqlite3.Row
-                val = conn.execute("SELECT * FROM ordens WHERE id=?", (st.session_state.edit_op_id,)).fetchone()
+                res = conn.execute("SELECT * FROM ordens WHERE id=?", (st.session_state.edit_op_id,)).fetchone()
+                if res:
+                    val = dict(res)
 
-        st.subheader(f"Passo 2: {'Ajustar Dados' if edit_mode else 'Registro'} - {st.session_state.maq_atual}")
+        with st.form("f_edicao_detalhada_v3"):
+            st.markdown("### 📄 Informações Gerais")
+            c1, c2, c3 = st.columns(3)
+            f_op = c1.text_input("Nº OP", value=val.get('numero_op', ""))
+            f_cli = c2.text_input("Cliente", value=val.get('cliente', ""))
+            f_cnpj = c3.text_input("CNPJ", value=val.get('cnpj', ""))
 
-        if edit_mode:
-            if st.button("❌ Cancelar Edição"):
-                st.session_state.edit_op_id = None
-                st.session_state.layout_confirmado = False
-                st.rerun()
+            # --- CAMPO DE DATA DE ENTREGA ADICIONADO ---
+            st.markdown("### 📅 Cronograma")
+            # Converte a data string do banco para objeto date do Python
+            data_atual_entrega = date.today()
+            if val.get('data_entrega'):
+                try:
+                    data_atual_entrega = datetime.strptime(val.get('data_entrega'), '%Y-%m-%d').date()
+                except:
+                    data_atual_entrega = date.today()
 
-        with st.form("f_completo"):
-            g1, g2, g3 = st.columns(3)
-            f_op = g1.text_input("Número OP", value=val['numero_op'] if edit_mode else "")
-            f_cli = g2.text_input("Cliente", value=val['cliente'] if edit_mode else "")
-            f_cnpj = g3.text_input("CNPJ", value=val['cnpj'] if edit_mode else "")
+            f_entrega = st.date_input("Nova Data de Entrega", value=data_atual_entrega)
 
-            # --- CORREÇÃO DAS DATAS ---
-            # Se for edição, converte a string do banco para data. Se não, usa hoje.
-            d_em_default = datetime.strptime(val['data_op'], '%Y-%m-%d').date() if edit_mode else date.today()
-            d_en_default = datetime.strptime(val['data_entrega'], '%Y-%m-%d').date() if edit_mode else date.today()
+            st.markdown("### 🛠️ Especificações Técnicas")
+            g3_cols = st.columns(3)
+            specs_finais = {}
+            for i, nome in enumerate(st.session_state.nomes_specs):
+                valor_padrao = st.session_state.campos_dinamicos.get(nome, "")
+                specs_finais[nome] = g3_cols[i % 3].text_input(nome, value=valor_padrao)
 
-            f_em = st.date_input("Emissão", d_em_default)
-            f_en = st.date_input("Entrega (Nova Data)", d_en_default)  # Aqui você consegue mudar a data!
+            st.markdown("### 🚛 Dados da Esteira")
+            l1, l2, l3, l4, l5 = st.columns(5)
+            f_mat = l1.text_input("Material", value=val.get('est_material', ""))
+            f_alt = l2.text_input("Altura", value=val.get('est_altura', ""))
+            f_com = l3.text_input("Comprimento", value=val.get('est_comprimento', ""))
+            f_lar = l4.text_input("Largura", value=val.get('est_largura', ""))
+            f_pla = l5.text_input("Plataforma", value=val.get('est_plataforma', ""))
 
-            st.write("### 🛠️ Especificações")
-            cd = st.columns(3)
-            for i, l in enumerate(st.session_state.campos_dinamicos.keys()):
-                # Mantém os valores técnicos que já estavam na OP
-                st.session_state.campos_dinamicos[l] = cd[i % 3].text_input(l,
-                                                                            value=st.session_state.campos_dinamicos[l])
+            st.markdown("### 🏢 Distribuição Interna")
+            d1, d2, d3 = st.columns(3)
+            with sqlite3.connect('fabrica_master.db') as conn:
+                sets = [s[0] for s in conn.execute("SELECT nome FROM setores").fetchall()]
 
-            st.write("### 🚛 Logística e Esteira")
-            e1, e2, e3 = st.columns(3)
-            emat = e1.text_input("Material Esteira", value=val['est_material'] if edit_mode else "")
-            ealt = e1.text_input("Altura", value=val['est_altura'] if edit_mode else "")
-            ecom = e2.text_input("Comprimento", value=val['est_comprimento'] if edit_mode else "")
-            elar = e2.text_input("Largura", value=val['est_largura'] if edit_mode else "")
-            epla = e3.text_input("Plataforma", value=val['est_plataforma'] if edit_mode else "")
+            idx_lid = 0
+            if edit_mode and val.get('responsavel_setor') in sets:
+                idx_lid = sets.index(val.get('responsavel_setor'))
 
-            st.write("### 🏢 Distribuição")
-            dist1, dist2, dist3 = st.columns(3)
-            dv = dist1.text_input("Vendedor", value=val['dist_vendedor'] if edit_mode else "")
-            dr = dist1.text_input("Revisor", value=val['dist_revisor'] if edit_mode else "")
-            dp = dist2.text_input("PCP", value=val['dist_pcp'] if edit_mode else "")
-            dj = dist2.text_input("Projeto", value=val['dist_projeto'] if edit_mode else "")
-            de = dist3.text_input("Elétrica", value=val['dist_eletrica'] if edit_mode else "")
-            dm = dist3.text_input("Montagem", value=val['dist_montagem'] if edit_mode else "")
+            f_lider = d1.selectbox("Líder Responsável", sets, index=idx_lid)
+            f_vend = d2.text_input("Vendedor", value=val.get('dist_vendedor', ""))
+            f_revi = d3.text_input("Revisor", value=val.get('dist_revisor', ""))
 
-            idx_lid = sets.index(val['responsavel_setor']) if edit_mode and val['responsavel_setor'] in sets else 0
-            flid = st.selectbox("Líder Responsável", sets, index=idx_lid)
+            d4, d5, d6, d7 = st.columns(4)
+            f_pcp = d4.text_input("PCP", value=val.get('dist_pcp', ""))
+            f_proj = d5.text_input("Projeto", value=val.get('dist_projeto', ""))
+            f_elet = d6.text_input("Elétrica", value=val.get('dist_eletrica', ""))
+            f_mont = d7.text_input("Montagem", value=val.get('dist_montagem', ""))
 
-            fend = st.text_input("Endereço de Entrega", value=val['exp_endereco'] if edit_mode else "")
-            fast = st.text_area("Assistência", value=val['ast_instalacao'] if edit_mode else "")
+            f_info = st.text_area("Observações Adicionais", value=val.get('ast_instalacao', ""))
 
-            # Botão Salvar (faz Update se for edição, ou Insert se for nova)
-            if st.form_submit_button("ATUALIZAR OP" if edit_mode else "SALVAR OP"):
+            submit = st.form_submit_button("💾 SALVAR ALTERAÇÕES")
+
+            if submit:
                 with sqlite3.connect('fabrica_master.db') as conn:
-                    if edit_mode:
-                        conn.execute("""UPDATE ordens SET 
-                            numero_op=?, equipamento=?, cliente=?, cnpj=?, data_op=?, data_entrega=?, responsavel_setor=?, 
-                            est_material=?, est_altura=?, est_comprimento=?, est_largura=?, est_plataforma=?, 
-                            dist_vendedor=?, dist_revisor=?, dist_pcp=?, dist_projeto=?, dist_eletrica=?, dist_montagem=?, 
-                            exp_endereco=?, ast_instalacao=?, info_adicionais_ficha=? 
-                            WHERE id=?""",
-                                     (f_op, st.session_state.maq_atual, f_cli, f_cnpj, str(f_em), str(f_en), flid, emat,
-                                      ealt, ecom,
-                                      elar, epla, dv, dr, dp, dj, de, dm, fend, fast,
-                                      json.dumps(st.session_state.campos_dinamicos), st.session_state.edit_op_id))
-                        st.session_state.edit_op_id = None  # Limpa o modo edição após salvar
-                    else:
-                        conn.execute("""INSERT INTO ordens (
-                            numero_op, equipamento, cliente, cnpj, data_op, data_entrega, responsavel_setor, 
-                            est_material, est_altura, est_comprimento, est_largura, est_plataforma, 
-                            dist_vendedor, dist_revisor, dist_pcp, dist_projeto, dist_eletrica, dist_montagem, 
-                            exp_endereco, ast_instalacao, info_adicionais_ficha) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                     (f_op, st.session_state.maq_atual, f_cli, f_cnpj, str(f_em), str(f_en), flid, emat,
-                                      ealt, ecom,
-                                      elar, epla, dv, dr, dp, dj, de, dm, fend, fast,
-                                      json.dumps(st.session_state.campos_dinamicos)))
+                    specs_json = json.dumps(specs_finais)
+                    # Adicionado data_entrega=? no UPDATE
+                    conn.execute("""UPDATE ordens SET 
+                            numero_op=?, cliente=?, cnpj=?, data_entrega=?,
+                            est_material=?, est_altura=?, est_comprimento=?, est_largura=?, est_plataforma=?,
+                            responsavel_setor=?, dist_vendedor=?, dist_revisor=?, dist_pcp=?, 
+                            dist_projeto=?, dist_eletrica=?, dist_montagem=?,
+                            ast_instalacao=?, info_adicionais_ficha=? WHERE id=?""",
+                                 (f_op, f_cli, f_cnpj, str(f_entrega),
+                                  f_mat, f_alt, f_com, f_lar, f_pla,
+                                  f_lider, f_vend, f_revi, f_pcp, f_proj, f_elet, f_mont,
+                                  f_info, specs_json, st.session_state.edit_op_id))
 
                 st.session_state.layout_confirmado = False
-                st.success("Operação realizada com sucesso!")
+                st.session_state.edit_op_id = None
+                st.success("OP Atualizada com sucesso!")
                 st.rerun()
+
+        if st.button("⬅️ Cancelar"):
+            st.session_state.layout_confirmado = False
+            st.session_state.edit_op_id = None
+            st.rerun()
 
 # --- CONFIGURAÇÃO INICIAL (Coloque isso no início do código, antes do menu) ---
-
 if not os.path.exists("anexos"):
     os.makedirs("anexos")
 
@@ -657,7 +685,7 @@ if menu == "📋 Lista de OPs":
                         if c_arq2.button("🗑️ Remover", key=f"rm_{op['id']}"):
                             with sqlite3.connect('fabrica_master.db') as conn:
                                 conn.execute("UPDATE ordens SET anexo=NULL WHERE id=?", (op['id'],))
-                            os.remove(caminho_arq)
+                            if os.path.exists(caminho_arq): os.remove(caminho_arq)
                             st.rerun()
 
                 arquivo_upload = st.file_uploader("Novo Anexo (Foto/PDF)", type=["pdf", "png", "jpg", "jpeg"],
@@ -674,24 +702,32 @@ if menu == "📋 Lista de OPs":
 
                 st.divider()
 
-                # --- 6. BOTÕES DE AÇÃO ---
+                # --- 6. BOTÕES DE AÇÃO (CORRIGIDO) ---
                 c_pdf, c_edit = st.columns(2)
                 c_pdf.download_button("📂 Gerar PDF Completo", gerar_pdf_op(op), f"OP_{op['numero_op']}.pdf",
                                       key=f"pdf_btn_{op['id']}")
+
                 if c_edit.button("✏️ Editar Ordem", key=f"edit_btn_{op['id']}"):
-                    # ESTA É A ALTERAÇÃO: Preparamos a memória antes de mudar de página
+                    # Inicialização completa da memória para evitar AttributeError
                     st.session_state.edit_op_id = op['id']
                     st.session_state.maq_atual = op['equipamento']
-                    st.session_state.campos_dinamicos = json.loads(op['info_adicionais_ficha'])
-                    st.session_state.layout_confirmado = True
 
-                    # Opcional: Avisar o usuário ou apenas dar o rerun
+                    # Carregamos as especificações técnicas salvas
+                    specs_salvas = json.loads(op['info_adicionais_ficha'])
+                    st.session_state.campos_dinamicos = specs_salvas
+
+                    # CORREÇÃO CRÍTICA: Definimos os nomes das especificações para o formulário
+                    st.session_state.nomes_specs = list(specs_salvas.keys())
+
+                    # Abre o formulário
+                    st.session_state.layout_confirmado = True
                     st.rerun()
 
             with t2:
+                # Checklist e acompanhamento seguem conforme seu original...
                 with sqlite3.connect('fabrica_master.db') as conn:
                     m = conn.execute("SELECT conjuntos FROM maquinas WHERE nome=?", (op['equipamento'],)).fetchone()
-                it = [i.strip() for i in m[0].split(",")] if m else []
+                it = [i.strip() for i in m[0].split(",")] if m and m[0] else []
                 done = op['checks_concluidos'].split("|") if op['checks_concluidos'] else []
                 sel = [i for i in it if st.checkbox(i, i in done, key=f"ck_{op['id']}_{i}")]
                 if st.button("Salvar Checklist", key=f"sck_{op['id']}"):
@@ -701,31 +737,12 @@ if menu == "📋 Lista de OPs":
                                      (p, "|".join(sel), op['id']))
                     st.rerun()
 
-            with t3:
-                logs = json.loads(op['acompanhamento_log'])
-                with st.form(f"chat_{op['id']}"):
-                    dst = st.selectbox("Para", cargos_chat)
-                    msg = st.text_area("Mensagem")
-                    if st.form_submit_button("Enviar"):
-                        logs.append({"cargo_destino": dst, "user_origem": st.session_state.user_logado,
-                                     "data_inicio": datetime.now().strftime("%d/%m %H:%M"), "msg": msg, "resposta": "",
-                                     "status": "Pendente", "historico_conversa": []})
-                        with sqlite3.connect('fabrica_master.db') as conn:
-                            conn.execute("UPDATE ordens SET acompanhamento_log=? WHERE id=?",
-                                         (json.dumps(logs), op['id']))
-                        st.rerun()
-                # Exibição dos logs conforme seu código original...
-                for i, l in enumerate(reversed(logs)):
-                    st.info(f"💬 De: {l['user_origem']} - {l['msg']}")  # Resumo para brevidade
-
-
 
 # --- RELATÓRIO DINÂMICO COM GRÁFICO POR LÍDER ---
 elif menu == "📊 Relatório":
     st.header("📊 Painel de Controle de Produção")
 
     with sqlite3.connect('fabrica_master.db') as conn:
-        # Mantendo o seu critério: Somente o que está em andamento (1% a 99%)
         query = """
             SELECT 
                 numero_op AS 'Nº OP', 
@@ -741,59 +758,36 @@ elif menu == "📊 Relatório":
         df = pd.read_sql_query(query, conn)
 
     if not df.empty:
-        # --- SEÇÃO 1: GRÁFICO DE PIZZA ---
-        st.subheader("👥 Distribuição de OPs por Líder")
-
-        # Agrupamento para o gráfico
-        df_pizza = df['Líder'].value_counts().reset_index()
-        df_pizza.columns = ['Líder', 'Qtd OPs']
-
-        import plotly.express as px
-
-        fig = px.pie(
-            df_pizza,
-            values='Qtd OPs',
-            names='Líder',
-            hole=0.4,  # Estilo rosca/donut
-            color_discrete_sequence=px.colors.qualitative.Safe
-        )
-        fig.update_layout(showlegend=True)
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.divider()
-
-        # --- SEÇÃO 2: TABELA DETALHADA ---
-        st.subheader("📋 Detalhamento de OPs em Fluxo")
-        st.dataframe(
-            df,
-            column_config={
-                "Progresso %": st.column_config.ProgressColumn(
-                    "Status",
-                    format="%d%%",
-                    min_value=0,
-                    max_value=100,
-                ),
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-
         # Métricas de Resumo
         c1, c2, c3 = st.columns(3)
         c1.metric("OPs em Produção", len(df))
         c2.metric("Líderes Ativos", df['Líder'].nunique())
-        c3.info("Filtro: Progresso entre 1% e 99%")
+
+        # --- BOTÃO DO PDF DO RELATÓRIO ---
+        pdf_geral = gerar_pdf_relatorio_geral(df)
+        st.download_button(
+            label="📥 Baixar Relatório Geral em PDF",
+            data=pdf_geral,
+            file_name=f"relatorio_producao_{date.today()}.pdf",
+            mime="application/pdf"
+        )
+        st.divider()
+
+        # Gráfico de Pizza
+        st.subheader("👥 Distribuição por Líder")
+        df_pizza = df['Líder'].value_counts().reset_index()
+        df_pizza.columns = ['Líder', 'Qtd OPs']
+        fig = px.pie(df_pizza, values='Qtd OPs', names='Líder', hole=0.4)
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.divider()
+
+        # Tabela Detalhada
+        st.subheader("📋 Detalhamento de OPs em Fluxo")
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
     else:
-        st.info("Nenhuma OP em andamento (1% a 99%) para exibir no gráfico.")
-
-    # --- HISTÓRICO (OPCIONAL) ---
-    with st.expander("🔍 Ver todas as OPs (Histórico 0% e 100%)"):
-        with sqlite3.connect('fabrica_master.db') as conn:
-            df_total = pd.read_sql_query("SELECT numero_op, cliente, responsavel_setor, progresso FROM ordens", conn)
-            st.write(df_total)
+        st.info("Nenhuma OP em andamento para gerar relatório.")
 
 
-"""
-streamlit run teste1.py
-"""
+
