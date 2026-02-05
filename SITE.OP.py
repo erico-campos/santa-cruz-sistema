@@ -187,8 +187,10 @@ def gerar_pdf_op(op_raw):
     elementos.append(Paragraph(f"ORDEM DE PRODUÇÃO: {op.get('numero_op', 'N/A')}", estilo_titulo_op))
 
     # Subtítulo: Líder Responsável (Identificação de quem a OP pertence)
-    lider = op.get('responsavel_setor', 'NÃO DEFINIDO')
-    elementos.append(Paragraph(f"Líder Responsável: <b>{lider.upper()}</b>", estilo_sub_lider))
+    # Pegamos o valor e garantimos que, se for None, vire uma string vazia ""
+    lider_val = op.get('responsavel_setor') or "NÃO DEFINIDO"
+    # Agora transformamos em maiúsculo sem risco de erro
+    elementos.append(Paragraph(f"Líder Responsável: <b>{str(lider_val).upper()}</b>", estilo_sub_lider))
 
     elementos.append(Spacer(1, 0.5 * cm))
 
@@ -788,6 +790,7 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Nenhuma OP em andamento para gerar relatório.")
+
 
 
 
