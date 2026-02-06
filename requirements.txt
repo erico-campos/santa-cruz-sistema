@@ -3,4 +3,6 @@ pandas
 st-gsheets-connection
 plotly
 reportlab
+pytz
+
 
