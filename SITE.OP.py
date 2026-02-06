@@ -1,4 +1,5 @@
 import streamlit as st
+from st_gsheets_connection import GSheetsConnection  # <--- ADICIONADO
 import sqlite3
 import pandas as pd
 import os
@@ -12,11 +13,13 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
 
-
-
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="Santa Cruz Produção Master", layout="wide")
 if not os.path.exists("anexos"): os.makedirs("anexos")
+
+# --- CONEXÃO GOOGLE SHEETS ---
+# Isso define o 'conn' que o seu erro disse que estava faltando
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- ESTADO DE SESSÃO (MEMÓRIA DO APP) ---
 if 'auth' not in st.session_state: st.session_state.auth = False
@@ -32,7 +35,6 @@ if 'edit_op_id' not in st.session_state: st.session_state.edit_op_id = None
 if 'edit_lid_id' not in st.session_state: st.session_state.edit_lid_id = None
 if 'edit_usr_id' not in st.session_state: st.session_state.edit_usr_id = None
 if 'edit_maq_id' not in st.session_state: st.session_state.edit_maq_id = None
-
 
 def iniciar_banco():
     with sqlite3.connect('fabrica_master.db') as conn:
