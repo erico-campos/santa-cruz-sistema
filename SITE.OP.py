@@ -1,61 +1,79 @@
-import streamlit as st
-from st_gsheets_connection import GSheetsConnection  # <--- ADICIONADO
-import sqlite3
-import pandas as pd
+import sys
 import os
+
+# --- CORREÇÃO DE ACENTUAÇÃO (CODEC ASCII) ---
+# Isso evita o erro de caracteres como 'á', 'ç', 'õ'
+if sys.stdout.encoding != 'UTF-8':
+    try:
+        import _locale
+        _locale._getdefaultlocale = (lambda *args: ['pt_BR', 'UTF-8'])
+    except:
+        pass
+
+import streamlit as st
+import pandas as pd
+import sqlite3
 import json
 from datetime import datetime, date
 from io import BytesIO
 import plotly.express as px
+
+# --- IMPORTAÇÃO DA CONEXÃO GOOGLE ---
+try:
+    from st_gsheets_connection import GSheetsConnection
+except ImportError:
+    try:
+        from streamlit_gsheets import GSheetsConnection
+    except ImportError:
+        st.error("🚨 Biblioteca 'st-gsheets-connection' não encontrada.")
+        st.stop()
+
+# --- BIBLIOTECAS DE PDF ---
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Santa Cruz Produção Master", layout="wide")
-if not os.path.exists("anexos"): os.makedirs("anexos")
+
+if not os.path.exists("anexos"):
+    os.makedirs("anexos")
 
 # --- CONEXÃO GOOGLE SHEETS ---
-# Isso define o 'conn' que o seu erro disse que estava faltando
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Usamos conn_sheets para não dar conflito com o SQLite
+conn_sheets = st.connection("gsheets", type=GSheetsConnection)
 
-# --- ESTADO DE SESSÃO (MEMÓRIA DO APP) ---
-if 'auth' not in st.session_state: st.session_state.auth = False
-if 'user_logado' not in st.session_state: st.session_state.user_logado = ""
-if 'cargo_logado' not in st.session_state: st.session_state.cargo_logado = ""
-if 'nivel' not in st.session_state: st.session_state.nivel = ""
-if 'layout_confirmado' not in st.session_state: st.session_state.layout_confirmado = False
-if 'maq_atual' not in st.session_state: st.session_state.maq_atual = ""
+# --- ESTADO DE SESSÃO ---
+for key in ['auth', 'user_logado', 'cargo_logado', 'nivel', 'layout_confirmado']:
+    if key not in st.session_state:
+        st.session_state[key] = False if key in ['auth', 'layout_confirmado'] else ""
+
 if 'campos_dinamicos' not in st.session_state:
-    st.session_state.campos_dinamicos = {"Alimentação": "", "Produto": "", "Estrutura": "", "Frascos": "",
-                                         "Produção": "", "Bicos": ""}
+    st.session_state.campos_dinamicos = {"Alimentação": "", "Produto": "", "Estrutura": "", "Frascos": "", "Produção": "", "Bicos": ""}
 if 'edit_op_id' not in st.session_state: st.session_state.edit_op_id = None
 if 'edit_lid_id' not in st.session_state: st.session_state.edit_lid_id = None
 if 'edit_usr_id' not in st.session_state: st.session_state.edit_usr_id = None
 if 'edit_maq_id' not in st.session_state: st.session_state.edit_maq_id = None
 
+# --- BANCO DE DADOS LOCAL ---
 def iniciar_banco():
-    with sqlite3.connect('fabrica_master.db') as conn:
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS ordens (
+    # Usamos db_local para evitar conflito com conn_sheets
+    with sqlite3.connect('fabrica_master.db') as db_local:
+        cursor = db_local.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS ordens (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, numero_op TEXT, equipamento TEXT, cliente TEXT, cnpj TEXT, 
                         data_op TEXT, vendedor TEXT, data_entrega TEXT, responsavel_setor TEXT, 
                         est_material TEXT, est_comprimento TEXT, est_altura TEXT, est_largura TEXT, est_plataforma TEXT,
                         dist_vendedor TEXT, dist_revisor TEXT, dist_pcp TEXT, dist_projeto TEXT, dist_eletrica TEXT, dist_montagem TEXT,
                         exp_endereco TEXT, ast_instalacao TEXT, info_adicionais_ficha TEXT DEFAULT "{}",
                         progresso INTEGER DEFAULT 0, checks_concluidos TEXT DEFAULT "", status TEXT DEFAULT 'Em Produção',
-                        acompanhamento_log TEXT DEFAULT "[]")''')
-        c.execute(
-            '''CREATE TABLE IF NOT EXISTS modelos_op (id INTEGER PRIMARY KEY AUTOINCREMENT, nome_maquina TEXT UNIQUE, layout_json TEXT)''')
-        c.execute(
-            "CREATE TABLE IF NOT EXISTS maquinas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE, conjuntos TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS setores (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE)")
-        c.execute(
-            "CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, senha TEXT, cargo TEXT, ativo INTEGER)")
-        conn.commit()
-
+                        acompanhamento_log TEXT DEFAULT "[]", anexo TEXT)''')
+        cursor.execute("CREATE TABLE IF NOT EXISTS maquinas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE, conjuntos TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS setores (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, senha TEXT, cargo TEXT, ativo INTEGER)")
+        db_local.commit()
 
 iniciar_banco()
 
@@ -270,27 +288,60 @@ if not st.session_state.auth:
                 st.error("Acesso negado.")
     st.stop()
 
-# --- LOGICA DE NAVEGAÇÃO UNIFICADA (CORREÇÃO DO REDIRECIONAMENTO) ---
-opcoes = ["📋 Lista de OPs", "📊 Relatório"]
+# --- LOGIN ---
+if not st.session_state.auth:
+    st.title("🏭 Login - Santa Cruz Produção Master")
+    with sqlite3.connect('fabrica_master.db') as db_login:
+        res_c = db_login.execute("SELECT DISTINCT cargo FROM usuarios").fetchall()
+        cargos = [c[0] for c in res_c]
 
-# 1. Define quem vê o menu Nova OP
-if st.session_state.nivel in ["ADM", "LIDER"]:
-    opcoes.insert(1, "➕ Nova OP")
+    if "ADM" not in cargos: cargos.append("ADM")
 
-# 2. Define quem vê Configurações
-if st.session_state.nivel == "ADM":
-    opcoes.append("⚙️ Configurações")
+    u = st.text_input("Usuário")
+    s_login = st.selectbox("Cargo", cargos)
+    p = st.text_input("Senha", type="password")
 
-# --- O SEGREDO ESTÁ AQUI ---
-# Se o botão 'Editar' foi clicado, o edit_op_id não é mais None.
-# Então, forçamos o menu a selecionar a "➕ Nova OP" (que está no index 1).
-if st.session_state.edit_op_id is not None:
-    menu_index = opcoes.index("➕ Nova OP")
-else:
-    menu_index = 0
+    if st.button("Entrar"):
+        if u == "admsantacruz" and p == "sc2024" and s_login == "ADM":
+            st.session_state.update(
+                {"auth": True, "nivel": "ADM", "user_logado": "Administrador", "cargo_logado": "ADM"})
+            st.rerun()
+        else:
+            with sqlite3.connect('fabrica_master.db') as db_login:
+                res = db_login.execute(
+                    "SELECT cargo, ativo, usuario FROM usuarios WHERE usuario=? AND senha=? AND cargo=?",
+                    (u, p, s_login)).fetchone()
+            if res and res[1] == 1:
+                st.session_state.update({"auth": True, "user_logado": res[2], "cargo_logado": res[0]})
+                st.session_state.nivel = "ADM" if res[0] == "PCP" else (
+                    "LIDER" if "LIDER" in res[0].upper() else "USER")
+                st.rerun()
+            else:
+                st.error("Acesso negado.")
+    st.stop()
 
-# Cria o menu com o index dinâmico
-menu = st.sidebar.radio("Navegação", opcoes, index=menu_index, key="menu_principal")
+# --- MENU LATERAL (SIDEBAR) ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2206/2206368.png", width=100)  # Opcional: Ícone ou sua Logo
+    st.title("Navegação")
+
+    # Define as opções com base no nível de acesso
+    opcoes = ["📋 Lista de OPs"]
+    if st.session_state.nivel == "ADM":
+        opcoes = ["📊 Relatório", "📋 Lista de OPs", "➕ Nova OP", "⚙️ Configurações"]
+    elif st.session_state.nivel == "LIDER":
+        opcoes = ["📋 Lista de OPs", "📊 Relatório"]
+
+    menu = st.sidebar.radio("Selecione a página:", opcoes)
+
+    st.divider()
+    st.write(f"👤 **Usuário:** {st.session_state.user_logado}")
+    st.write(f"🛠️ **Cargo:** {st.session_state.cargo_logado}")
+
+    if st.button("Sair / Logoff"):
+        st.session_state.auth = False
+        st.rerun()
+
 
 
 # --- PÁGINA DE CONFIGURAÇÕES COMPLETA
@@ -450,27 +501,30 @@ elif menu == "➕ Nova OP":
     st.header("➕ Gerenciar Ordem de Produção (Nuvem)")
 
     # 1. CONEXÃO E CARREGAMENTO
-    # Conecta ao Sheets e lê a base atual para saber se é uma edição
-    df_base = conn.read(worksheet="Página1", ttl=0)
+    try:
+        # Lê a base atual do Sheets para verificar se a OP já existe ou para salvar novas
+        df_base = conn_sheets.read(worksheet="Página1", ttl=0)
+    except Exception as e:
+        st.error(f"Erro ao acessar a planilha: {e}")
+        st.stop()
+
     edit_mode = st.session_state.edit_op_id is not None
 
-    # Se estiver em modo edição, tenta capturar os dados da OP selecionada
+    # Se estiver em modo edição, captura os dados da OP selecionada
     dados_op = {}
     if edit_mode:
-        # Filtra a linha correspondente ao número da OP
         linha_selecionada = df_base[df_base['numero_op'] == st.session_state.edit_op_id]
         if not linha_selecionada.empty:
             dados_op = linha_selecionada.iloc[0].to_dict()
 
-    # --- PASSO 1: ESTRUTURA TÉCNICA ---
+    # --- PASSO 1: DEFINIÇÃO DE ESTRUTURA ---
     if not st.session_state.layout_confirmado:
         st.subheader("Passo 1: Definir Especificações da Máquina")
 
         if 'nomes_specs' not in st.session_state:
-            # Padrão solicitado
             st.session_state.nomes_specs = ["Alimentação", "Frasco", "Amostra", "Bicos", "Produto", "Estrutura"]
 
-        # Interface para gerir os campos (Incluir/Excluir)
+        # Interface para gerir os campos técnicos
         for i, nome in enumerate(st.session_state.nomes_specs):
             c_ed1, c_ed2 = st.columns([5, 1])
             st.session_state.nomes_specs[i] = c_ed1.text_input(f"Campo Técnico {i + 1}", value=nome,
@@ -484,7 +538,6 @@ elif menu == "➕ Nova OP":
             st.rerun()
 
         st.divider()
-        # Seleção do Equipamento (Pode ser uma aba no Sheets também)
         maquinas_lista = ["Envasadora", "Rotuladora", "Tampadora", "Linha Completa"]
         st.session_state.maq_atual = st.selectbox("Equipamento Base:", maquinas_lista)
 
@@ -492,105 +545,85 @@ elif menu == "➕ Nova OP":
             st.session_state.layout_confirmado = True
             st.rerun()
 
-    # --- PASSO 2: FORMULÁRIO COMPLETO ---
+    # --- PASSO 2: FORMULÁRIO DE DADOS ---
     else:
         st.subheader(f"Passo 2: Ficha Técnica - {st.session_state.maq_atual}")
 
         with st.form("form_sheets_op"):
-            # BLOCO: DADOS DA OP
             st.markdown("### 📄 Dados da Ordem de Produção")
             c1, c2, c3 = st.columns(3)
             f_op = c1.text_input("N° OP", value=dados_op.get("numero_op", ""))
             f_cli = c2.text_input("Cliente", value=dados_op.get("cliente", ""))
-            f_data_op = c3.date_input("Data da OP", value=date.today())
+
+            # Tratamento de Data
+            try:
+                data_op_val = datetime.strptime(dados_op.get("data_op"),
+                                                '%Y-%m-%d').date() if edit_mode else date.today()
+            except:
+                data_op_val = date.today()
+            f_data_op = c3.date_input("Data da OP", value=data_op_val)
 
             c4, c5 = st.columns(2)
-            # Tenta converter a data salva ou usa hoje
             try:
-                d_ent = datetime.strptime(dados_op.get("data_entrega"), '%Y-%m-%d').date()
+                d_ent = datetime.strptime(dados_op.get("data_entrega"),
+                                          '%Y-%m-%d').date() if edit_mode else date.today()
             except:
                 d_ent = date.today()
             f_entrega = c4.date_input("Data de Entrega", value=d_ent)
             f_vend_op = c5.text_input("Vendedor (OP)", value=dados_op.get("vendedor", ""))
 
-            # BLOCO: DADOS DO CLIENTE
-            st.markdown("### 👥 Dados do Cliente")
-            cc1, cc2 = st.columns(2)
-            f_cnpj = cc1.text_input("CNPJ", value=dados_op.get("cnpj", ""))
-            f_end = cc2.text_input("Endereço Completo", value=dados_op.get("exp_endereco", ""))
-
-            # BLOCO: ESPECIFICAÇÕES DINÂMICAS
-            st.markdown("### 🛠️ Especificações da Máquina")
+            st.markdown("### 🛠️ Especificações Técnicas")
             g_specs = st.columns(3)
             specs_finais = {}
-            # Se for edição, tenta carregar os valores salvos no JSON
-            valores_specs = {}
-            if edit_mode and dados_op.get("info_adicionais_ficha"):
-                valores_specs = json.loads(dados_op.get("info_adicionais_ficha"))
+            valores_specs = json.loads(dados_op.get("info_adicionais_ficha", "{}")) if edit_mode else {}
 
             for i, nome in enumerate(st.session_state.nomes_specs):
                 v_pre = valores_specs.get(nome, "")
                 specs_finais[nome] = g_specs[i % 3].text_input(nome, value=v_pre)
 
-            # BLOCO: DADOS DA ESTEIRA
-            st.markdown("### 🚛 Dados da Esteira")
-            e1, e2, e3, e4, e5 = st.columns(5)
-            f_mat = e1.text_input("Material", value=dados_op.get("est_material", ""))
-            f_alt = e2.text_input("Altura", value=dados_op.get("est_altura", ""))
-            f_com = e3.text_input("Comprimento", value=dados_op.get("est_comprimento", ""))
-            f_lar = e4.text_input("Largura", value=dados_op.get("est_largura", ""))
-            f_pla = e5.text_input("Plataforma", value=dados_op.get("est_plataforma", ""))
+            st.markdown("### 🚛 Logística e Fábrica")
+            e1, e2, e3 = st.columns(3)
+            f_mat = e1.text_input("Material Esteira", value=dados_op.get("est_material", ""))
+            f_lider = e2.selectbox("Líder Responsável", ["Líder Montagem", "Líder Usinagem", "Líder Elétrica"])
+            f_cnpj = e3.text_input("CNPJ", value=dados_op.get("cnpj", ""))
 
-            # BLOCO: DISTRIBUIÇÃO INTERNA
-            st.markdown("### 🏢 Distribuição Interna")
-            d1, d2, d3 = st.columns(3)
-            f_dist_vend = d1.text_input("Vendedor (Distrib.)", value=dados_op.get("dist_vendedor", ""))
-            f_revi = d2.text_input("Revisor", value=dados_op.get("dist_revisor", ""))
-            f_pcp = d3.text_input("PCP", value=dados_op.get("dist_pcp", ""))
-
-            d4, d5, d6 = st.columns(3)
-            f_proj = d4.text_input("Projeto", value=dados_op.get("dist_projeto", ""))
-            f_elet = d5.text_input("Elétrica", value=dados_op.get("dist_eletrica", ""))
-            f_mont = d6.text_input("Montagem", value=dados_op.get("dist_montagem", ""))
-
-            st.markdown("### 📝 Finalização")
             f_info = st.text_area("Informações Adicionais", value=dados_op.get("ast_instalacao", ""))
-            f_lider = st.selectbox("Líder do Setor Responsável", ["Líder Montagem", "Líder Usinagem", "Líder Elétrica"])
 
-            # BOTÃO DE SALVAMENTO NO GOOGLE SHEETS
+            # BOTÃO SALVAR (USANDO conn_sheets)
             btn_label = "💾 ATUALIZAR NA PLANILHA" if edit_mode else "🚀 SALVAR NA PLANILHA"
             submit = st.form_submit_button(btn_label)
 
             if submit:
-                # 1. Prepara a nova linha
-                nova_linha = {
-                    "numero_op": f_op, "cliente": f_cli, "data_op": str(f_data_op),
-                    "data_entrega": str(f_entrega), "vendedor": f_vend_op, "cnpj": f_cnpj,
-                    "exp_endereco": f_end, "equipamento": st.session_state.maq_atual,
-                    "est_material": f_mat, "est_altura": f_alt, "est_comprimento": f_com,
-                    "est_largura": f_lar, "est_plataforma": f_pla, "dist_vendedor": f_dist_vend,
-                    "dist_revisor": f_revi, "dist_pcp": f_pcp, "dist_projeto": f_proj,
-                    "dist_eletrica": f_elet, "dist_montagem": f_mont, "ast_instalacao": f_info,
-                    "responsavel_setor": f_lider, "info_adicionais_ficha": json.dumps(specs_finais),
-                    "status": dados_op.get("status", "Em Produção"),
-                    "progresso": dados_op.get("progresso", 0)
-                }
+                if not f_op:
+                    st.error("O número da OP é obrigatório!")
+                else:
+                    nova_linha = {
+                        "numero_op": f_op, "cliente": f_cli, "data_op": str(f_data_op),
+                        "data_entrega": str(f_entrega), "vendedor": f_vend_op, "cnpj": f_cnpj,
+                        "equipamento": st.session_state.maq_atual,
+                        "ast_instalacao": f_info, "responsavel_setor": f_lider,
+                        "info_adicionais_ficha": json.dumps(specs_finais),
+                        "status": dados_op.get("status", "Em Produção"),
+                        "progresso": dados_op.get("progresso", 0),
+                        "acompanhamento_log": dados_op.get("acompanhamento_log", "[]")
+                    }
 
-                # 2. Se for edição, removemos a linha antiga do DataFrame antes de adicionar a nova
-                if edit_mode:
-                    df_base = df_base[df_base['numero_op'] != st.session_state.edit_op_id]
+                    # Se for edição, remove a versão antiga antes de inserir a nova
+                    df_final = df_base.copy()
+                    if edit_mode:
+                        df_final = df_final[df_final['numero_op'] != st.session_state.edit_op_id]
 
-                # 3. Adiciona a nova linha e envia para o Sheets
-                df_atualizado = pd.concat([df_base, pd.DataFrame([nova_linha])], ignore_index=True)
-                conn.update(worksheet="Página1", data=df_atualizado)
+                    df_final = pd.concat([df_final, pd.DataFrame([nova_linha])], ignore_index=True)
 
-                # 4. Limpa estados e avisa o utilizador
-                st.session_state.edit_op_id = None
-                st.session_state.layout_confirmado = False
-                st.success("✅ Dados sincronizados com o Google Sheets!")
-                st.rerun()
+                    # GRAVAÇÃO NO GOOGLE SHEETS
+                    conn_sheets.update(worksheet="Página1", data=df_final)
 
-        if st.button("⬅️ Cancelar e Voltar"):
+                    st.session_state.edit_op_id = None
+                    st.session_state.layout_confirmado = False
+                    st.success("✅ Sincronizado com Sucesso!")
+                    st.rerun()
+
+        if st.button("⬅️ Cancelar"):
             st.session_state.edit_op_id = None
             st.session_state.layout_confirmado = False
             st.rerun()
@@ -605,45 +638,42 @@ with sqlite3.connect('fabrica_master.db') as conn:
     except:
         pass
 
-# --- LISTA DE OPs COMPLETA COM ANEXOS E CORES ---
-# --- ABA: LISTA DE OPs ---
+# --- LISTA DE OPs COMPLETA ---
 if menu == "📋 Lista de OPs":
     st.header("📋 Controle de Ordens de Produção")
 
     # 1. LEITURA DOS DADOS (GOOGLE SHEETS)
     try:
-        df = conn.read(worksheet="Página1", ttl=0)
+        # Usando o nome correto da conexão definido no topo
+        df = conn_sheets.read(worksheet="Página1", ttl=0)
     except Exception as e:
         st.error(f"Erro ao conectar com a planilha: {e}")
         st.stop()
 
     if df.empty or "numero_op" not in df.columns:
-        st.info("Nenhuma OP encontrada na planilha. Verifique os cabeçalhos.")
+        st.info("Nenhuma OP encontrada na planilha. Verifique os cabeçalhos no Google Sheets.")
     else:
         # Busca cargos para o chat
         cargos_chat = ["ADM", "PCP", "LIDER", "MONTAGEM", "ELETRICA", "PROJETO"]
 
-        # Ordenação Decrescente (Ex: SC-0512 no topo)
+        # Ordenação: Mais recentes no topo
         df['sort_num'] = df['numero_op'].astype(str).str.extract('(\d+)').fillna(0).astype(float)
         df = df.sort_values(by='sort_num', ascending=False)
 
         for _, op in df.iterrows():
-            # Lógica de Alerta por Data
+            # Lógica de Alerta por Data (Sinalizador Visual)
             hoje = date.today()
             cor_alerta = "⚪"
             try:
                 data_ent_str = str(op['data_entrega'])
                 entrega = datetime.strptime(data_ent_str, '%Y-%m-%d').date()
                 dias = (entrega - hoje).days
-                if dias > 30:
-                    cor_alerta = "🟢"
-                elif 15 <= dias <= 30:
-                    cor_alerta = "🟡"
-                else:
-                    cor_alerta = "🔴"
-            except:
-                pass
+                if dias > 30: cor_alerta = "🟢"
+                elif 15 <= dias <= 30: cor_alerta = "🟡"
+                else: cor_alerta = "🔴"
+            except: pass
 
+            # Card Expansível para cada OP
             with st.expander(f"{cor_alerta} OP {op['numero_op']} - {op['cliente']} | Entrega: {op['data_entrega']}"):
                 t1, t2, t3 = st.tabs(["📄 Ficha Técnica", "✅ Checklist", "💬 Acompanhamento"])
 
@@ -654,39 +684,20 @@ if menu == "📋 Lista de OPs":
                     c_a.write(f"**Cliente:** {op.get('cliente', 'N/A')}")
                     c_b.write(f"**CNPJ:** {op.get('cnpj', 'N/A')}")
                     c_b.write(f"**Vendedor:** {op.get('vendedor', 'N/A')}")
-                    c_c.write(f"**Emissão:** {op.get('data_op', 'N/A')}")
+                    c_c.write(f"**Máquina:** {op.get('equipamento', 'N/A')}")
                     c_c.write(f"**Entrega:** {op.get('data_entrega', 'N/A')}")
-                    st.write(f"📍 **Endereço:** {op.get('exp_endereco', 'N/A')}")
 
                     st.divider()
-                    st.subheader("🛠️ Especificações da Máquina")
+                    st.subheader("🛠️ Especificações Técnicas")
                     try:
                         specs = json.loads(op['info_adicionais_ficha'])
                         cols = st.columns(3)
                         for i, (k, v) in enumerate(specs.items()):
                             cols[i % 3].write(f"**{k}:** {v}")
                     except:
-                        st.write("Sem especificações técnicas detalhadas.")
+                        st.write("Sem especificações detalhadas.")
 
-                    st.divider()
-                    st.subheader("🚛 Dados da Esteira")
-                    e1, e2, e3, e4, e5 = st.columns(5)
-                    e1.write(f"**Material:**\n{op.get('est_material', '-')}")
-                    e2.write(f"**Altura:**\n{op.get('est_altura', '-')}")
-                    e3.write(f"**Comp.:**\n{op.get('est_comprimento', '-')}")
-                    e4.write(f"**Largura:**\n{op.get('est_largura', '-')}")
-                    e5.write(f"**Plat.:**\n{op.get('est_plataforma', '-')}")
-
-                    st.divider()
-                    st.subheader("🏢 Distribuição e Fábrica")
-                    d1, d2, d3, d4 = st.columns(4)
-                    d1.write(f"**PCP:** {op.get('dist_pcp', '-')}")
-                    d2.write(f"**Projeto:** {op.get('dist_projeto', '-')}")
-                    d3.write(f"**Elétrica:** {op.get('dist_eletrica', '-')}")
-                    d4.write(f"**Montagem:** {op.get('dist_montagem', '-')}")
-
-                    st.info(
-                        f"**Líder Responsável:** {op.get('responsavel_setor', '-')}\n\n**Obs:** {op.get('ast_instalacao', '-')}")
+                    st.info(f"**Líder Responsável:** {op.get('responsavel_setor', '-')}\n\n**Obs:** {op.get('ast_instalacao', '-')}")
 
                     # BOTÕES DE AÇÃO
                     st.divider()
@@ -697,25 +708,28 @@ if menu == "📋 Lista de OPs":
                         st.session_state.layout_confirmado = True
                         st.rerun()
 
-                    # Chamada da função de PDF
-                    col_pdf.download_button("📂 PDF", gerar_pdf_op(op), f"OP_{op['numero_op']}.pdf",
-                                            key=f"pdf_{op['numero_op']}", use_container_width=True)
+                    # PDF Gerado na hora
+                    col_pdf.download_button("📂 Baixar PDF", gerar_pdf_op(op), f"OP_{op['numero_op']}.pdf", key=f"pdf_{op['numero_op']}", use_container_width=True)
 
                     if st.session_state.nivel == "ADM":
                         if col_del.button("🗑️ Excluir", key=f"btn_del_{op['numero_op']}", use_container_width=True):
                             df_new = df[df['numero_op'] != op['numero_op']]
-                            conn.update(worksheet="Página1", data=df_new)
+                            # ATUALIZAÇÃO NO GOOGLE SHEETS
+                            conn_sheets.update(worksheet="Página1", data=df_new)
                             st.rerun()
 
                 with t2:
                     st.write("### Progresso da Produção")
-                    prog = int(op.get('progresso', 0))
-                    st.progress(prog / 100)
+                    try:
+                        prog_val = int(float(op.get('progresso', 0)))
+                    except:
+                        prog_val = 0
+                    st.progress(prog_val / 100)
                     st.write(f"Status Atual: **{op.get('status', 'Em Produção')}**")
 
                 with t3:
+                    # Chat de Acompanhamento (Logs gravados na Planilha)
                     import pytz
-
                     fuso_br = pytz.timezone('America/Sao_Paulo')
                     agora_br = datetime.now(fuso_br).strftime("%d/%m %H:%M")
 
@@ -725,51 +739,56 @@ if menu == "📋 Lista de OPs":
                         logs = []
 
                     with st.form(f"chat_{op['numero_op']}"):
-                        dest = st.selectbox("Para:", cargos_chat)
-                        msg = st.text_area("Sua mensagem")
+                        msg = st.text_input("Sua mensagem")
                         if st.form_submit_button("Enviar Mensagem"):
                             if msg:
-                                logs.append({"cargo_destino": dest, "user_origem": st.session_state.user_logado,
-                                             "data": agora_br, "msg": msg})
+                                logs.append({"user": st.session_state.user_logado, "data": agora_br, "msg": msg})
+                                # Localiza a OP no DataFrame e atualiza o log
                                 df.loc[df['numero_op'] == op['numero_op'], 'acompanhamento_log'] = json.dumps(logs)
-                                conn.update(worksheet="Página1", data=df)
+                                # SALVA DE VOLTA NA NUVEM
+                                conn_sheets.update(worksheet="Página1", data=df)
                                 st.rerun()
 
                     for m in reversed(logs):
-                        st.chat_message(
-                            "user" if m['user_origem'] == st.session_state.user_logado else "assistant").write(
-                            f"**{m['user_origem']}** para **{m['cargo_destino']}** - 🕒 {m['data']}\n\n{m['msg']}")
+                        st.chat_message("user").write(f"**{m['user']}** - 🕒 {m['data']}\n\n{m['msg']}")
 
-# --- RELATÓRIO DINÂMICO COM GRÁFICO POR LÍDER ---
+# --- RELATÓRIO DINÂMICO ---
 elif menu == "📊 Relatório":
     st.header("📊 Painel de Controle de Produção")
 
     # 1. LEITURA DOS DADOS (GOOGLE SHEETS)
     try:
-        df_rel = conn.read(worksheet="Página1", ttl=0)
+        # Garantindo o uso da conexão correta
+        df_rel = conn_sheets.read(worksheet="Dados", ttl=0)
     except Exception as e:
-        st.error(f"Erro ao conectar com a planilha: {e}")
+        st.error(f"Erro ao carregar dados da planilha: {e}")
         st.stop()
 
     if not df_rel.empty:
-        # 2. FILTRAR DADOS PARA O RELATÓRIO (Apenas OPs em andamento)
-        # Garantimos que a coluna progresso seja tratada como número
+        # 2. TRATAMENTO DE DADOS
+        # Converte progresso para número para evitar erros nos gráficos
         df_rel['progresso'] = pd.to_numeric(df_rel['progresso'], errors='coerce').fillna(0)
+
+        # Filtramos apenas o que ainda não foi entregue (Progresso < 100)
         df_fluxo = df_rel[df_rel['progresso'] < 100].copy()
 
         if df_fluxo.empty:
-            st.info("Todas as OPs cadastradas já foram concluídas (100%).")
+            st.success("🎉 Todas as OPs foram concluídas! Não há carga pendente.")
         else:
-            # 3. MÉTRICAS DE RESUMO
+            # 3. MÉTRICAS RÁPIDAS
             c1, c2, c3 = st.columns(3)
-            c1.metric("OPs em Produção", len(df_fluxo))
-            c2.metric("Líderes Ativos",
+            c1.metric("OPs em Aberto", len(df_fluxo))
+            c2.metric("Líderes com Carga",
                       df_fluxo['responsavel_setor'].nunique() if 'responsavel_setor' in df_fluxo.columns else 0)
 
-            # 4. BOTÃO PARA BAIXAR PDF DO MAPA GERAL
-            # Preparamos o DataFrame com os nomes de colunas que a função gerar_pdf_relatorio_geral espera
-            df_pdf = df_fluxo.copy()
-            df_pdf = df_pdf.rename(columns={
+            prog_medio = df_fluxo['progresso'].mean()
+            c3.metric("Progresso Médio", f"{prog_medio:.1f}%")
+
+            st.divider()
+
+            # 4. EXPORTAÇÃO (PDF DO MAPA GERAL)
+            # Preparamos o DF para a função de PDF (ajustando nomes de colunas)
+            df_pdf = df_fluxo.rename(columns={
                 'numero_op': 'Nº OP',
                 'cliente': 'Cliente',
                 'equipamento': 'Máquina',
@@ -778,46 +797,50 @@ elif menu == "📊 Relatório":
                 'progresso': 'Progresso %'
             })
 
-            pdf_data = gerar_pdf_relatorio_geral(df_pdf)
+            pdf_geral = gerar_pdf_relatorio_geral(df_pdf)
             st.download_button(
                 label="📥 Baixar Mapa Geral de Produção (PDF)",
-                data=pdf_data,
-                file_name=f"mapa_producao_santa_cruz_{date.today()}.pdf",
+                data=pdf_geral,
+                file_name=f"MAPA_SANTA_CRUZ_{date.today()}.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
 
-            st.divider()
-
-            # 5. GRÁFICOS E VISUALIZAÇÃO
+            # 5. GRÁFICOS
             col_esq, col_dir = st.columns(2)
 
             with col_esq:
                 st.subheader("👥 Carga por Líder")
-                fig_pizza = px.pie(df_fluxo, names='responsavel_setor', hole=0.3)
-                st.plotly_chart(fig_pizza, use_container_width=True)
+                if 'responsavel_setor' in df_fluxo.columns:
+                    fig_pizza = px.pie(df_fluxo, names='responsavel_setor', hole=0.4,
+                                       color_discrete_sequence=px.colors.qualitative.Pastel)
+                    st.plotly_chart(fig_pizza, use_container_width=True)
+                else:
+                    st.warning("Coluna 'responsavel_setor' não encontrada.")
 
             with col_dir:
-                st.subheader("📈 Progresso Médio")
-                # Gráfico simples de barras para ver quem está mais adiantado
-                fig_bar = px.bar(df_fluxo, x='numero_op', y='progresso', color='responsavel_setor',
-                                 labels={'numero_op': 'Nº OP', 'progresso': 'Progresso (%)'})
+                st.subheader("📈 Progresso por OP")
+                fig_bar = px.bar(df_fluxo, x='numero_op', y='progresso',
+                                 color='responsavel_setor',
+                                 text='progresso',
+                                 labels={'numero_op': 'Nº da Ordem', 'progresso': 'Progresso (%)'})
+                fig_bar.update_traces(texttemplate='%{text}%', textposition='outside')
                 st.plotly_chart(fig_bar, use_container_width=True)
 
             st.divider()
 
             # 6. TABELA DETALHADA
-            st.subheader("📋 Tabela de Acompanhamento em Tempo Real")
-            # Selecionamos apenas colunas importantes para não poluir a tela
-            colunas_view = ['numero_op', 'cliente', 'equipamento', 'responsavel_setor', 'data_entrega', 'progresso']
+            st.subheader("📋 Detalhamento da Produção")
+            colunas_exibicao = ['numero_op', 'cliente', 'equipamento', 'responsavel_setor', 'data_entrega', 'progresso']
             st.dataframe(
-                df_fluxo[colunas_view],
+                df_fluxo[colunas_exibicao],
                 use_container_width=True,
                 hide_index=True
             )
-
     else:
-        st.info("A planilha do Google está vazia. Cadastre uma OP para gerar o relatório.")
+        st.info("A planilha está vazia. Cadastre sua primeira OP para visualizar os relatórios.")
+
+
 
 
 
