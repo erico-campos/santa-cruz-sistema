@@ -337,77 +337,90 @@ with st.sidebar:
         st.session_state.auth = False
         st.rerun()
 
-# --- PÁGINA DE CONFIGURAÇÕES COMPLETA (USUÁRIOS E MÁQUINAS) ---
+# --- PÁGINA DE CONFIGURAÇÕES (GESTÃO COMPLETA) ---
 if menu == "⚙️ Configurações":
-    st.title("⚙️ Configurações do Sistema")
+    st.title("⚙️ Painel de Controle e Configurações")
 
-    tab1, tab2, tab3 = st.tabs(["👤 Usuários", "🚜 Máquinas", "📊 Gestão"])
+    tab_user, tab_maq = st.tabs(["👤 Gestão de Usuários", "🚜 Gestão de Máquinas"])
 
-    # --- ABA 1: CADASTRO DE USUÁRIOS ---
-    with tab1:
-        st.subheader("📝 Novo Usuário")
-        with st.form("form_usuario", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                u_login = st.text_input("Login")
-                u_nome = st.text_input("Nome Completo")
-                u_cargo = st.text_input("Cargo/Setor (Livre)")
-            with col2:
-                u_senha = st.text_input("Senha", type="password")
-                u_nivel = st.selectbox("Nível", ["USER", "LIDER", "ADM"])
+    # --- ABA 1: USUÁRIOS (CADASTRO, EDIÇÃO E EXCLUSÃO) ---
+    with tab_user:
+        st.subheader("📝 Usuários do Sistema")
 
-            if st.form_submit_button("💾 Salvar Usuário"):
-                if u_login and u_senha:
-                    df_u = conn_sheets.read(worksheet="USUARIOS", ttl=0)
-                    novo_u = pd.DataFrame(
-                        [{"usuario": u_login, "senha": u_senha, "nome": u_nome, "nivel": u_nivel, "cargo": u_cargo,
-                          "ativo": 1}])
-                    conn_sheets.update(worksheet="USUARIOS", data=pd.concat([df_u, novo_u], ignore_index=True))
-                    st.success(f"Usuário {u_nome} salvo!")
-                else:
-                    st.warning("Preencha Login e Senha.")
+        # 1. Carregar dados atuais
+        try:
+            df_u = conn_sheets.read(worksheet="USUARIOS", ttl=0)
+        except:
+            df_u = pd.DataFrame(columns=["usuario", "senha", "nome", "nivel", "cargo", "ativo"])
 
-    # --- ABA 2: CADASTRO DE MÁQUINAS (AQUI ESTÁ O QUE FALTAVA) ---
-    with tab2:
-        st.subheader("🚜 Cadastrar Nova Máquina")
-        st.info("Digite o nome da máquina/equipamento para que ela apareça na criação de OPs.")
+        # Formulário de Cadastro/Edição
+        with st.expander("➕ Cadastrar / Editar Usuário"):
+            with st.form("form_usuario", clear_on_submit=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    u_login = st.text_input("Login (ID Único)")
+                    u_nome = st.text_input("Nome Completo")
+                    u_cargo = st.text_input("Setor/Cargo (Livre)")
+                with col2:
+                    u_senha = st.text_input("Senha", type="password")
+                    u_nivel = st.selectbox("Nível de Acesso", ["USER", "LIDER", "ADM"])
 
-        with st.form("form_maquina", clear_on_submit=True):
-            nova_maq = st.text_input("Nome da Máquina (Ex: Dobra 01, Laser 2000, CNC)")
+                if st.form_submit_button("💾 Salvar Usuário"):
+                    if u_login and u_senha:
+                        # Remove se já existir (para editar) e adiciona o novo
+                        df_u = df_u[df_u['usuario'] != u_login]
+                        novo_u = pd.DataFrame(
+                            [{"usuario": u_login, "senha": u_senha, "nome": u_nome, "nivel": u_nivel, "cargo": u_cargo,
+                              "ativo": 1}])
+                        df_final_u = pd.concat([df_u, novo_u], ignore_index=True)
+                        conn_sheets.update(worksheet="USUARIOS", data=df_final_u)
+                        st.success(f"Usuário {u_login} atualizado!")
+                        st.rerun()
 
-            if st.form_submit_button("💾 Salvar Máquina"):
-                if nova_maq:
-                    try:
-                        # Lê máquinas atuais
-                        df_m = conn_sheets.read(worksheet="MAQUINAS", ttl=0)
-                        # Adiciona a nova
-                        novo_m = pd.DataFrame([{"nome_maquina": nova_maq.strip().upper()}])
-                        df_m_total = pd.concat([df_m, novo_m], ignore_index=True).drop_duplicates()
-                        # Atualiza planilha
-                        conn_sheets.update(worksheet="MAQUINAS", data=df_m_total)
-                        st.success(f"Máquina '{nova_maq}' cadastrada com sucesso!")
-                    except Exception as e:
-                        st.error(f"Erro ao salvar máquina: {e}")
-                else:
-                    st.warning("Digite o nome da máquina.")
+        # Tabela para Excluir
+        st.write("---")
+        st.write("**Lista de Usuários:**")
+        for i, row in df_u.iterrows():
+            col_inf, col_btn = st.columns([4, 1])
+            col_inf.write(f"👤 {row['nome']} | {row['cargo']} ({row['nivel']})")
+            if col_btn.button("🗑️ Excluir", key=f"del_u_{row['usuario']}"):
+                df_u = df_u[df_u['usuario'] != row['usuario']]
+                conn_sheets.update(worksheet="USUARIOS", data=df_u)
+                st.success("Usuário removido!")
+                st.rerun()
 
-    # --- ABA 3: GESTÃO E VISUALIZAÇÃO ---
-    with tab3:
-        col_list1, col_list2 = st.columns(2)
-        with col_list1:
-            st.write("**Usuários Ativos:**")
-            try:
-                st.dataframe(conn_sheets.read(worksheet="USUARIOS", ttl=0)[["usuario", "cargo"]],
-                             use_container_width=True)
-            except:
-                st.write("Sem dados.")
+    # --- ABA 2: MÁQUINAS (CADASTRO, EDIÇÃO E EXCLUSÃO) ---
+    with tab_maq:
+        st.subheader("🚜 Gestão de Máquinas")
 
-        with col_list2:
-            st.write("**Máquinas Cadastradas:**")
-            try:
-                st.dataframe(conn_sheets.read(worksheet="MAQUINAS", ttl=0), use_container_width=True)
-            except:
-                st.write("Sem dados.")
+        try:
+            df_m = conn_sheets.read(worksheet="MAQUINAS", ttl=0)
+        except:
+            df_m = pd.DataFrame(columns=["nome_maquina"])
+
+        with st.expander("➕ Nova Máquina"):
+            with st.form("form_maquina", clear_on_submit=True):
+                m_nome = st.text_input("Nome da Máquina")
+                if st.form_submit_button("💾 Cadastrar"):
+                    if m_nome:
+                        m_nome = m_nome.strip().upper()
+                        if m_nome not in df_m['nome_maquina'].values:
+                            novo_m = pd.DataFrame([{"nome_maquina": m_nome}])
+                            df_final_m = pd.concat([df_m, novo_m], ignore_index=True)
+                            conn_sheets.update(worksheet="MAQUINAS", data=df_final_m)
+                            st.success("Máquina cadastrada!")
+                            st.rerun()
+
+        # Tabela para Excluir Máquinas
+        st.write("---")
+        for i, row in df_m.iterrows():
+            col_inf_m, col_btn_m = st.columns([4, 1])
+            col_inf_m.write(f"🚜 {row['nome_maquina']}")
+            if col_btn_m.button("🗑️ Apagar", key=f"del_m_{row['nome_maquina']}"):
+                df_m = df_m[df_m['nome_maquina'] != row['nome_maquina']]
+                conn_sheets.update(worksheet="MAQUINAS", data=df_m)
+                st.success("Máquina removida!")
+                st.rerun()
 
 # --- Nova Op ---
 elif menu == "➕ Nova OP":
