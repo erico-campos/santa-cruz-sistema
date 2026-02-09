@@ -376,7 +376,7 @@ if menu == "⚙️ Configurações":
                             "nivel": u_nivel, "cargo": u_cargo, "ativo": 1 if u_ativo else 0
                         }])
                         df_final_u = pd.concat([df_u, novo_u], ignore_index=True)
-                        conn_sheets.update(worksheet="USUARIOS", data=df_final_u)
+                        conn_sheets.create(worksheet="USUARIOS", data=df_final_u)
                         st.success(f"Registro de {u_id} salvo com sucesso!")
                         st.rerun()
 
@@ -668,6 +668,8 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
+
+
 
 
 
