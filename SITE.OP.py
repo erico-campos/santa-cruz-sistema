@@ -310,273 +310,182 @@ if not st.session_state.auth:
     st.stop()
 
 # --- MENU LATERAL (SIDEBAR) ---
+# --- LÓGICA DE ACESSO CONFORME CARGO E NÍVEL ---
 with st.sidebar:
-    # Centralização do ícone e título
-    st.image("https://cdn-icons-png.flaticon.com/512/2206/2206368.png", width=100)
     st.title("Santa Cruz Nav")
 
-    # Define as opções com base no nível de acesso definido no login
-    opcoes = ["📋 Lista de OPs"]
+    # Lógica de permissões baseada no seu pedido:
+    cargo = str(st.session_state.cargo_logado).upper()
+    nivel = st.session_state.nivel
 
-    if st.session_state.nivel == "ADM":
+    opcoes = ["📋 Lista de OPs"]  # Padrão para todos
+
+    # Regra: ADM ou PCP (qualquer um que contenha PCP ou ADM no cargo)
+    if "ADM" in cargo or "PCP" in cargo or nivel == "ADM":
         opcoes = ["📊 Relatório", "📋 Lista de OPs", "➕ Nova OP", "⚙️ Configurações"]
-    elif st.session_state.nivel == "LIDER":
-        opcoes = ["📋 Lista de OPs", "📊 Relatório"]
 
-    # Seleção de Menu
-    menu = st.radio("Selecione a página:", opcoes)
+    # Regra: Líder ou Vendas
+    elif nivel in ["LIDER", "VENDAS"]:
+        opcoes = ["📋 Lista de OPs", "📊 Relatório", "➕ Nova OP"]
+
+    # Regra: Usuário comum
+    else:
+        opcoes = ["📋 Lista de OPs", "➕ Nova OP"]
+
+    menu = st.radio("Ir para:", opcoes)
 
     st.divider()
+    st.write(f"👤 {st.session_state.user_logado}")
+    st.write(f"🛠️ {cargo}")
 
-    # Informações do Usuário com ícones para facilitar leitura rápida
-    st.markdown(f"👤 **Usuário:** {st.session_state.user_logado}")
-    st.markdown(f"🛠️ **Cargo:** {st.session_state.cargo_logado}")
 
-    # Botão de Logoff com confirmação visual
-    if st.button("🚪 Sair / Logoff", use_container_width=True):
-        st.session_state.auth = False
-        st.rerun()
-
-# --- PÁGINA DE CONFIGURAÇÕES (GESTÃO COMPLETA) ---
+# --- PÁGINA DE CONFIGURAÇÕES (LIBERDADE TOTAL E GESTÃO) ---
 if menu == "⚙️ Configurações":
-    st.title("⚙️ Painel de Controle e Configurações")
+    st.title("⚙️ Gestão de Fábrica - Santa Cruz")
 
-    tab_user, tab_maq = st.tabs(["👤 Gestão de Usuários", "🚜 Gestão de Máquinas"])
+    tab_u, tab_m = st.tabs(["👤 Usuários e Líderes", "🚜 Máquinas e Periféricos"])
 
-    # --- ABA 1: USUÁRIOS (CADASTRO, EDIÇÃO E EXCLUSÃO) ---
-    with tab_user:
-        st.subheader("📝 Usuários do Sistema")
+    # --- GESTÃO DE USUÁRIOS, LÍDERES, ADM, PCP ---
+    with tab_u:
+        st.subheader("📝 Cadastro de Pessoas")
 
-        # 1. Carregar dados atuais
         try:
             df_u = conn_sheets.read(worksheet="USUARIOS", ttl=0)
         except:
             df_u = pd.DataFrame(columns=["usuario", "senha", "nome", "nivel", "cargo", "ativo"])
 
-        # Formulário de Cadastro/Edição
-        with st.expander("➕ Cadastrar / Editar Usuário"):
-            with st.form("form_usuario", clear_on_submit=True):
+        with st.expander("➕ Adicionar/Editar Usuário ou Líder"):
+            with st.form("form_pessoal", clear_on_submit=True):
                 col1, col2 = st.columns(2)
                 with col1:
-                    u_login = st.text_input("Login (ID Único)")
+                    u_id = st.text_input("ID/Login (Ex: pcp02, lider_laser)")
                     u_nome = st.text_input("Nome Completo")
-                    u_cargo = st.text_input("Setor/Cargo (Livre)")
+                    u_cargo = st.text_input("Cargo ou Setor (Ex: Líder de Montagem, PCP, ADM)")
                 with col2:
                     u_senha = st.text_input("Senha", type="password")
-                    u_nivel = st.selectbox("Nível de Acesso", ["USER", "LIDER", "ADM"])
+                    # Níveis conforme sua regra
+                    u_nivel = st.selectbox("Nível de Acesso", ["USER", "LIDER", "ADM", "VENDAS"])
+                    u_ativo = st.checkbox("Usuário Ativo", value=True)
 
-                if st.form_submit_button("💾 Salvar Usuário"):
-                    if u_login and u_senha:
-                        # Remove se já existir (para editar) e adiciona o novo
-                        df_u = df_u[df_u['usuario'] != u_login]
-                        novo_u = pd.DataFrame(
-                            [{"usuario": u_login, "senha": u_senha, "nome": u_nome, "nivel": u_nivel, "cargo": u_cargo,
-                              "ativo": 1}])
+                if st.form_submit_button("💾 Salvar Registro"):
+                    if u_id and u_senha:
+                        # Remove anterior para atualizar
+                        df_u = df_u[df_u['usuario'] != u_id]
+                        novo_u = pd.DataFrame([{
+                            "usuario": u_id, "senha": u_senha, "nome": u_nome,
+                            "nivel": u_nivel, "cargo": u_cargo, "ativo": 1 if u_ativo else 0
+                        }])
                         df_final_u = pd.concat([df_u, novo_u], ignore_index=True)
                         conn_sheets.update(worksheet="USUARIOS", data=df_final_u)
-                        st.success(f"Usuário {u_login} atualizado!")
+                        st.success(f"Registro de {u_id} salvo com sucesso!")
                         st.rerun()
 
-        # Tabela para Excluir
+        # Tabela de Edição/Exclusão
         st.write("---")
-        st.write("**Lista de Usuários:**")
         for i, row in df_u.iterrows():
-            col_inf, col_btn = st.columns([4, 1])
-            col_inf.write(f"👤 {row['nome']} | {row['cargo']} ({row['nivel']})")
-            if col_btn.button("🗑️ Excluir", key=f"del_u_{row['usuario']}"):
+            c1, c2, c3 = st.columns([3, 1, 1])
+            status = "✅" if row['ativo'] == 1 else "🚫"
+            c1.write(f"{status} **{row['nome']}** | {row['cargo']} ({row['nivel']})")
+            if c3.button("🗑️ Apagar", key=f"del_u_{row['usuario']}"):
                 df_u = df_u[df_u['usuario'] != row['usuario']]
                 conn_sheets.update(worksheet="USUARIOS", data=df_u)
-                st.success("Usuário removido!")
                 st.rerun()
 
-    # --- ABA 2: MÁQUINAS (CADASTRO, EDIÇÃO E EXCLUSÃO) ---
-    with tab_maq:
-        st.subheader("🚜 Gestão de Máquinas")
-
+    # --- GESTÃO DE MÁQUINAS E PERIFÉRICOS ---
+    with tab_m:
+        st.subheader("🚜 Máquinas e Componentes")
         try:
             df_m = conn_sheets.read(worksheet="MAQUINAS", ttl=0)
         except:
-            df_m = pd.DataFrame(columns=["nome_maquina"])
+            df_m = pd.DataFrame(columns=["nome_maquina", "perifericos"])
 
-        with st.expander("➕ Nova Máquina"):
-            with st.form("form_maquina", clear_on_submit=True):
-                m_nome = st.text_input("Nome da Máquina")
-                if st.form_submit_button("💾 Cadastrar"):
-                    if m_nome:
-                        m_nome = m_nome.strip().upper()
-                        if m_nome not in df_m['nome_maquina'].values:
-                            novo_m = pd.DataFrame([{"nome_maquina": m_nome}])
-                            df_final_m = pd.concat([df_m, novo_m], ignore_index=True)
-                            conn_sheets.update(worksheet="MAQUINAS", data=df_final_m)
-                            st.success("Máquina cadastrada!")
-                            st.rerun()
+        with st.form("form_maq"):
+            m_nome = st.text_input("Nome da Máquina")
+            m_peri = st.text_area("Periféricos / Peças desta Máquina (separe por vírgula)")
+            if st.form_submit_button("💾 Salvar Máquina"):
+                df_m = df_m[df_m['nome_maquina'] != m_nome]
+                novo_m = pd.DataFrame([{"nome_maquina": m_nome.upper(), "perifericos": m_peri}])
+                conn_sheets.update(worksheet="MAQUINAS", data=pd.concat([df_m, novo_m], ignore_index=True))
+                st.rerun()
 
-        # Tabela para Excluir Máquinas
         st.write("---")
         for i, row in df_m.iterrows():
-            col_inf_m, col_btn_m = st.columns([4, 1])
-            col_inf_m.write(f"🚜 {row['nome_maquina']}")
-            if col_btn_m.button("🗑️ Apagar", key=f"del_m_{row['nome_maquina']}"):
+            c_m1, c_m2 = st.columns([4, 1])
+            c_m1.write(f"🚜 **{row['nome_maquina']}**: {row['perifericos']}")
+            if c_m2.button("🗑️", key=f"del_m_{row['nome_maquina']}"):
                 df_m = df_m[df_m['nome_maquina'] != row['nome_maquina']]
                 conn_sheets.update(worksheet="MAQUINAS", data=df_m)
-                st.success("Máquina removida!")
                 st.rerun()
 
 # --- Nova Op ---
-elif menu == "➕ Nova OP":
-    st.header("➕ Gerenciar Ordem de Produção (Nuvem)")
+# --- PÁGINA: NOVA OP ---
+if menu == "➕ Nova OP":
+    st.title("➕ Abrir Nova Ordem de Produção")
 
-    # 1. CONEXÃO E CARREGAMENTO
+    # 1. Busca lista de máquinas cadastradas
     try:
-        # Mesma coisa aqui: leitura limpa da primeira aba
-        df_base = conn_sheets.read(ttl=0)
-    except Exception as e:
-        st.error(f"Erro ao acessar a planilha: {e}")
-        st.stop()
+        df_maquinas = conn_sheets.read(worksheet="MAQUINAS", ttl=0)
+        lista_maquinas = df_maquinas['nome_maquina'].tolist()
+    except:
+        lista_maquinas = ["Cadastre uma máquina primeiro"]
 
-    edit_mode = st.session_state.edit_op_id is not None
-
-    # Se estiver em modo edição, captura os dados da OP selecionada para preencher o formulário
-    dados_op = {}
-    if edit_mode:
-        linha_selecionada = df_base[df_base['numero_op'] == st.session_state.edit_op_id]
-        if not linha_selecionada.empty:
-            dados_op = linha_selecionada.iloc[0].to_dict()
-
-    # --- PASSO 1: DEFINIÇÃO DE ESTRUTURA (Campos Dinâmicos) ---
-    if not st.session_state.layout_confirmado:
-        st.subheader("Passo 1: Definir Especificações da Máquina")
-
-        # Inicializa nomes das especificações se estiverem vazios
-        if 'nomes_specs' not in st.session_state or not st.session_state.nomes_specs:
-            st.session_state.nomes_specs = ["Alimentação", "Frasco", "Amostra", "Bicos", "Produto", "Estrutura"]
-
-        # Interface para gerir os campos técnicos dinamicamente
-        for i, nome in enumerate(st.session_state.nomes_specs):
-            c_ed1, c_ed2 = st.columns([5, 1])
-            st.session_state.nomes_specs[i] = c_ed1.text_input(f"Campo Técnico {i + 1}", value=nome,
-                                                               key=f"spec_key_{i}")
-            if c_ed2.button("🗑️", key=f"del_key_{i}"):
-                st.session_state.nomes_specs.pop(i)
-                st.rerun()
-
-        if st.button("➕ Adicionar Nova Especificação"):
-            st.session_state.nomes_specs.append("Novo Campo")
-            st.rerun()
+    with st.form("form_nova_op", clear_on_submit=True):
+        st.subheader("Informações do Cliente")
+        c1, c2 = st.columns(2)
+        n_op = c1.text_input("Número da OP")
+        cliente = c2.text_input("Nome do Cliente")
 
         st.divider()
+        st.subheader("Configuração Técnica")
 
-        # Busca máquinas cadastradas no banco local SQLite para o selectbox
-        with sqlite3.connect('fabrica_master.db') as db:
-            maquinas_banco = [m[0] for m in db.execute("SELECT nome FROM maquinas").fetchall()]
+        col_m, col_d = st.columns([1, 1])
+        maquina_sel = col_m.selectbox("Selecione a Máquina", lista_maquinas)
 
-        if not maquinas_banco:
-            maquinas_banco = ["Envasadora", "Rotuladora", "Tampadora", "Linha Completa"]
+        # Busca periféricos da máquina selecionada para sugestão
+        perifericos_sugeridos = ""
+        if maquina_sel in lista_maquinas:
+            perifericos_sugeridos = df_maquinas[df_maquinas['nome_maquina'] == maquina_sel]['perifericos'].values[0]
 
-        st.session_state.maq_atual = st.selectbox("Equipamento Base:", maquinas_banco)
+        pecas = st.text_area("Descrição das Peças / Periféricos", value=perifericos_sugeridos)
 
-        if st.button("Ir para Preenchimento de Dados ➡️"):
-            st.session_state.layout_confirmado = True
-            st.rerun()
+        st.divider()
+        st.subheader("Prazos e Responsáveis")
+        c3, c4 = st.columns(2)
+        data_ent = c3.date_input("Data Prevista de Entrega")
+        vendedor = c4.text_input("Vendedor Responsável")
 
-    # --- PASSO 2: FORMULÁRIO DE DADOS ---
-    else:
-        st.subheader(f"Passo 2: Ficha Técnica - {st.session_state.maq_atual}")
+        btn_gerar = st.form_submit_button("🚀 Gerar Ordem de Produção")
 
-        with st.form("form_sheets_op"):
-            st.markdown("### 📄 Dados da Ordem de Produção")
-            c1, c2, c3 = st.columns(3)
-            f_op = c1.text_input("N° OP", value=dados_op.get("numero_op", ""))
-            f_cli = c2.text_input("Cliente", value=dados_op.get("cliente", ""))
+        if btn_gerar:
+            if n_op and cliente:
+                try:
+                    # Lê dados atuais
+                    df_dados = conn_sheets.read(worksheet="DADOS", ttl=0)
 
-            # Tratamento robusto para campos de data vindos da planilha
-            try:
-                data_op_val = datetime.strptime(str(dados_op.get("data_op")),
-                                                '%Y-%m-%d').date() if edit_mode else date.today()
-            except:
-                data_op_val = date.today()
-            f_data_op = c3.date_input("Data da OP", value=data_op_val)
+                    # Cria nova linha respeitando suas colunas da planilha
+                    nova_linha = pd.DataFrame([{
+                        "numero_op": n_op,
+                        "cliente": cliente,
+                        "data_op": pd.Timestamp.now().strftime('%d/%m/%Y'),
+                        "data_entrega": data_ent.strftime('%d/%m/%Y'),
+                        "vendedor": vendedor,
+                        "equipamento": maquina_sel,
+                        "info_adicionais_ficha": pecas,
+                        "status": "Pendente",
+                        "responsavel_setor": st.session_state.user_logado,  # Quem criou
+                        "progresso": 0,
+                        "checks_concluidos": ""
+                    }])
 
-            c4, c5 = st.columns(2)
-            try:
-                d_ent = datetime.strptime(str(dados_op.get("data_entrega")),
-                                          '%Y-%m-%d').date() if edit_mode else date.today()
-            except:
-                d_ent = date.today()
-            f_entrega = c4.date_input("Data de Entrega", value=d_ent)
-            f_vend_op = c5.text_input("Vendedor (OP)", value=dados_op.get("vendedor", ""))
+                    # Atualiza Planilha
+                    df_final = pd.concat([df_dados, nova_linha], ignore_index=True)
+                    conn_sheets.update(worksheet="DADOS", data=df_final)
 
-            st.markdown("### 🛠️ Especificações Técnicas")
-            g_specs = st.columns(3)
-            specs_finais = {}
-
-            # Carrega as especificações técnicas dinâmicas armazenadas em JSON
-            try:
-                raw_info = dados_op.get("info_adicionais_ficha", "{}")
-                valores_specs = json.loads(raw_info) if isinstance(raw_info, str) else {}
-            except:
-                valores_specs = {}
-
-            for i, nome in enumerate(st.session_state.nomes_specs):
-                v_pre = valores_specs.get(nome, "")
-                specs_finais[nome] = g_specs[i % 3].text_input(nome, value=v_pre)
-
-            st.markdown("### 🚛 Logística e Fábrica")
-            e1, e2, e3 = st.columns(3)
-            f_mat = e1.text_input("Material Esteira", value=dados_op.get("est_material", ""))
-
-            # Busca líderes cadastrados no banco local para o selectbox
-            with sqlite3.connect('fabrica_master.db') as db:
-                lideres_banco = [s[0] for s in db.execute("SELECT nome FROM setores").fetchall()]
-            if not lideres_banco:
-                lideres_banco = ["Líder Montagem", "Líder Usinagem", "Líder Elétrica"]
-
-            f_lider = e2.selectbox("Líder Responsável", lideres_banco)
-            f_cnpj = e3.text_input("CNPJ", value=dados_op.get("cnpj", ""))
-
-            f_info = st.text_area("Informações Adicionais / Obs", value=dados_op.get("ast_instalacao", ""))
-
-            # BOTÃO SALVAR (Ajustado para o nome da aba padronizado)
-            btn_label = "💾 ATUALIZAR NA PLANILHA" if edit_mode else "🚀 SALVAR NA PLANILHA"
-            submit = st.form_submit_button(btn_label)
-
-            if submit:
-                if not f_op:
-                    st.error("O número da OP é obrigatório!")
-                else:
-                    nova_linha = {
-                        "numero_op": f_op, "cliente": f_cli, "data_op": str(f_data_op),
-                        "data_entrega": str(f_entrega), "vendedor": f_vend_op, "cnpj": f_cnpj,
-                        "equipamento": st.session_state.maq_atual,
-                        "ast_instalacao": f_info, "responsavel_setor": f_lider,
-                        "info_adicionais_ficha": json.dumps(specs_finais),
-                        "status": dados_op.get("status", "Em Produção"),
-                        "progresso": dados_op.get("progresso", 0),
-                        "acompanhamento_log": dados_op.get("acompanhamento_log", "[]"),
-                        "est_material": f_mat
-                    }
-
-                    # Sincronização com o Google Sheets
-                    df_final = df_base.copy()
-                    if edit_mode:
-                        # Se for edição, remove a entrada antiga antes de adicionar a nova
-                        df_final = df_final[df_final['numero_op'] != st.session_state.edit_op_id]
-
-                    df_final = pd.concat([df_final, pd.DataFrame([nova_linha])], ignore_index=True)
-
-                    # Envio dos dados para a aba padronizada NOME_ABA ("DADOS")
-                    conn_sheets.update(worksheet=NOME_ABA, data=df_final)
-
-                    # Reset de estados após o sucesso
-                    st.session_state.edit_op_id = None
-                    st.session_state.layout_confirmado = False
-                    st.success("✅ Dados sincronizados com o Google Sheets!")
-                    st.rerun()
-
-        if st.button("⬅️ Cancelar e Voltar"):
-            st.session_state.edit_op_id = None
-            st.session_state.layout_confirmado = False
-            st.rerun()
+                    st.success(f"✅ OP {n_op} para {cliente} gerada com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro ao salvar OP: {e}")
+            else:
+                st.warning("Preencha o Número da OP e o Cliente.")
 
 # --- CONFIGURAÇÃO INICIAL E MANUTENÇÃO DO BANCO ---
 # Garante a existência do diretório para uploads de anexos
@@ -593,146 +502,68 @@ with sqlite3.connect('fabrica_master.db') as db_init:
         # A coluna já existe ou o banco ainda não foi criado (iniciar_banco resolverá)
         pass
 
-
-# --- LISTA DE OPs COMPLETA ---
+# --- PÁGINA: LISTA DE OPs ---
 if menu == "📋 Lista de OPs":
-    st.header("📋 Controle de Ordens de Produção")
+    st.title("📋 Lista de Ordens de Produção")
 
-    # 1. LEITURA DOS DADOS (GOOGLE SHEETS)
     try:
-        # Removemos o worksheet=NOME_ABA para evitar o Erro 400
+        # 1. Leitura dos dados da planilha
         df = conn_sheets.read(ttl=0)
+
+        if df.empty:
+            st.info("Nenhuma ordem de produção encontrada.")
+        else:
+            # --- LÓGICA DE FILTRO DE ACESSO ---
+            cargo_user = str(st.session_state.cargo_logado).upper()
+            nivel_user = st.session_state.nivel
+            nome_user = st.session_state.user_logado
+
+            # Se for LIDER ou VENDAS, filtra para ver apenas o que é DELE
+            if nivel_user in ["LIDER", "VENDAS"] and "ADM" not in cargo_user and "PCP" not in cargo_user:
+                # Filtra pela coluna de quem criou a OP (ajuste o nome da coluna se necessário, ex: 'SOLICITANTE')
+                if 'SOLICITANTE' in df.columns:
+                    df = df[df['SOLICITANTE'] == nome_user]
+                st.warning(f"Exibindo apenas OPs criadas por: {nome_user}")
+
+            # --- FILTROS DE PESQUISA NA TELA ---
+            col_f1, col_f2 = st.columns(2)
+            busca_op = col_f1.text_input("🔍 Buscar por Número da OP ou Cliente")
+
+            status_opcoes = ["Todos"] + list(df['STATUS'].unique()) if 'STATUS' in df.columns else ["Todos"]
+            filtro_status = col_f2.selectbox("Filtrar por Status", status_opcoes)
+
+            # Aplica filtros de pesquisa
+            if busca_op:
+                df = df[df.astype(str).apply(lambda x: busca_op.lower() in x.str.lower().values, axis=1)]
+            if filtro_status != "Todos":
+                df = df[df['STATUS'] == filtro_status]
+
+            # --- EXIBIÇÃO DAS OPs EM CARDS ---
+            st.write(f"Exibindo **{len(df)}** resultados:")
+
+            for i, row in df.iterrows():
+                with st.expander(f"📦 OP: {row.get('OP', 'N/A')} - Cliente: {row.get('CLIENTE', 'N/A')}"):
+                    c1, c2, c3 = st.columns(3)
+                    c1.markdown(f"**Data:** {row.get('DATA', 'N/A')}")
+                    c2.markdown(f"**Máquina:** {row.get('MAQUINA', 'N/A')}")
+
+                    # Cor do Status
+                    status_atual = row.get('STATUS', 'Pendente')
+                    cor = "🔴" if status_atual == "Pendente" else "🟡" if status_atual == "Em Produção" else "🟢"
+                    c3.markdown(f"**Status:** {cor} {status_atual}")
+
+                    st.divider()
+                    st.write(f"**Peças/Descrição:** {row.get('PEÇAS', 'N/A')}")
+
+                    # Botão para Ver Detalhes / Editar (Apenas ADM/PCP/LIDER podem editar)
+                    if nivel_user in ["ADM", "PCP", "LIDER"]:
+                        if st.button(f"📝 Editar OP {row.get('OP')}", key=f"edit_{i}"):
+                            st.session_state.op_para_editar = row.get('OP')
+                            st.info("Funcionalidade de edição selecionada.")
+
     except Exception as e:
-        st.error(f"Erro ao conectar com a planilha: {e}")
-        st.stop()
-
-
-    if df.empty or "numero_op" not in df.columns:
-        st.info("Nenhuma OP encontrada na nuvem. Vá em 'Nova OP' para cadastrar.")
-    else:
-        # Busca cargos ativos para o sistema de mensagens (Banco Local SQLite)
-        with sqlite3.connect('fabrica_master.db') as db_local:
-            res_cargos = db_local.execute("SELECT DISTINCT cargo FROM usuarios WHERE ativo=1").fetchall()
-            cargos_chat = [c[0] for c in res_cargos]
-
-        # Ordenação: Mais recentes no topo (extraindo números para ordenar corretamente)
-        df['sort_num'] = df['numero_op'].astype(str).str.extract('(\d+)').fillna(0).astype(float)
-        df = df.sort_values(by='sort_num', ascending=False)
-
-        for _, op in df.iterrows():
-            # Lógica de Alerta Visual (Cores baseadas na data de entrega)
-            hoje = date.today()
-            cor_alerta = "⚪"
-            try:
-                entrega = pd.to_datetime(op['data_entrega']).date()
-                dias = (entrega - hoje).days
-                if dias > 30:
-                    cor_alerta = "🟢"
-                elif 15 <= dias <= 30:
-                    cor_alerta = "🟡"
-                else:
-                    cor_alerta = "🔴"
-            except:
-                dias = "N/A"
-
-            # Card Expansível para cada Ordem de Produção
-            titulo_card = f"{cor_alerta} OP {op['numero_op']} - {op['cliente']} | Entrega: {op['data_entrega']}"
-            with st.expander(titulo_card):
-                t1, t2, t3 = st.tabs(["📄 Ficha Técnica", "✅ Checklist", "💬 Acompanhamento"])
-
-                with t1:
-                    if cor_alerta == "🔴":
-                        st.error(f"🚨 **URGENTE:** Entrega em {dias} dias!")
-
-                    st.subheader("Dados do Projeto")
-                    c_a, c_b, c_c = st.columns(3)
-                    c_a.write(f"**Nº OP:** {op['numero_op']}")
-                    c_a.write(f"**Cliente:** {op['cliente']}")
-                    c_b.write(f"**Equipamento:** {op['equipamento']}")
-                    c_b.write(f"**CNPJ:** {op['cnpj']}")
-                    c_c.write(f"**Entrega:** {op['data_entrega']}")
-                    c_c.write(f"**Líder:** {op.get('responsavel_setor', 'N/A')}")
-
-                    st.divider()
-                    st.subheader("🛠️ Especificações Técnicas")
-                    try:
-                        specs = json.loads(op['info_adicionais_ficha'])
-                        cols_s = st.columns(3)
-                        for i, (k, v) in enumerate(specs.items()):
-                            cols_s[i % 3].write(f"**{k}:** {v}")
-                    except:
-                        st.write("Sem detalhes técnicos registrados.")
-
-                    st.info(f"**Observações:** {op.get('ast_instalacao', '-')}")
-
-                    # Botões de Ação
-                    st.divider()
-                    col_edit, col_pdf, col_del = st.columns(3)
-
-                    if col_edit.button("✏️ Editar", key=f"btn_ed_{op['numero_op']}", use_container_width=True):
-                        st.session_state.edit_op_id = op['numero_op']
-                        st.session_state.layout_confirmado = True
-                        st.rerun()
-
-                    pdf_op = gerar_pdf_op(op)
-                    col_pdf.download_button("📂 Baixar PDF", pdf_op, f"OP_{op['numero_op']}.pdf",
-                                            key=f"pdf_{op['numero_op']}", use_container_width=True)
-
-                    if st.session_state.nivel == "ADM":
-                        if col_del.button("🗑️ Excluir", key=f"btn_del_{op['numero_op']}", use_container_width=True):
-                            df_new = df[df['numero_op'] != op['numero_op']]
-                            conn_sheets.update(worksheet=NOME_ABA, data=df_new)
-                            st.success("OP removida!")
-                            st.rerun()
-
-                with t2:
-                    st.write("### Progresso da Produção")
-                    with sqlite3.connect('fabrica_master.db') as db_local:
-                        m_info = db_local.execute("SELECT conjuntos FROM maquinas WHERE nome=?",
-                                                  (op['equipamento'],)).fetchone()
-
-                    itens_checklist = [i.strip() for i in m_info[0].split(",")] if m_info and m_info[0] else []
-                    concluidos = str(op.get('checks_concluidos', '')).split("|") if op.get('checks_concluidos') else []
-
-                    if itens_checklist:
-                        selecionados = [i for i in itens_checklist if
-                                        st.checkbox(i, i in concluidos, key=f"ck_{op['numero_op']}_{i}")]
-                        if st.button("💾 Atualizar Progresso", key=f"sck_{op['numero_op']}"):
-                            percentual = int((len(selecionados) / len(itens_checklist)) * 100)
-                            status_txt = "Concluído" if percentual == 100 else "Em Produção"
-
-                            df.loc[df['numero_op'] == op['numero_op'], 'progresso'] = percentual
-                            df.loc[df['numero_op'] == op['numero_op'], 'checks_concluidos'] = "|".join(selecionados)
-                            df.loc[df['numero_op'] == op['numero_op'], 'status'] = status_txt
-
-                            conn_sheets.update(worksheet=NOME_ABA, data=df)
-                            st.success(f"Progresso de {percentual}% salvo!")
-                            st.rerun()
-
-                with t3:
-                    import pytz
-
-                    fuso_br = pytz.timezone('America/Sao_Paulo')
-                    agora = datetime.now(fuso_br).strftime("%d/%m %H:%M")
-                    try:
-                        logs = json.loads(op.get('acompanhamento_log', '[]'))
-                    except:
-                        logs = []
-
-                    with st.form(f"chat_{op['numero_op']}"):
-                        dest = st.selectbox("Enviar para:", cargos_chat)
-                        mensagem = st.text_area("Sua mensagem")
-                        if st.form_submit_button("Enviar"):
-                            if mensagem:
-                                logs.append({"user": st.session_state.user_logado, "destino": dest, "data": agora,
-                                             "msg": mensagem})
-                                df.loc[df['numero_op'] == op['numero_op'], 'acompanhamento_log'] = json.dumps(logs)
-                                conn_sheets.update(worksheet=NOME_ABA, data=df)
-                                st.rerun()
-
-                    for m in reversed(logs):
-                        st.chat_message("user").write(
-                            f"**{m['user']}** → **{m['destino']}** ({m['data']})\n\n{m['msg']}")
+        st.error(f"Erro ao carregar lista: {e}")
+        st.info("Verifique se a aba 'DADOS' é a primeira da sua planilha.")
 
 # --- RELATÓRIO DINÂMICO ---
 elif menu == "📊 Relatório":
@@ -837,6 +668,7 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
+
 
 
 
