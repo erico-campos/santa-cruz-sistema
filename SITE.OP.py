@@ -337,72 +337,77 @@ with st.sidebar:
         st.session_state.auth = False
         st.rerun()
 
-
-# --- PÁGINA DE CONFIGURAÇÕES (COMPLETA E LIVRE) ---
+# --- PÁGINA DE CONFIGURAÇÕES COMPLETA (USUÁRIOS E MÁQUINAS) ---
 if menu == "⚙️ Configurações":
     st.title("⚙️ Configurações do Sistema")
 
-    tab1, tab2 = st.tabs(["👤 Cadastro de Usuários", "📊 Gestão de Acesso"])
+    tab1, tab2, tab3 = st.tabs(["👤 Usuários", "🚜 Máquinas", "📊 Gestão"])
 
+    # --- ABA 1: CADASTRO DE USUÁRIOS ---
     with tab1:
-        st.subheader("📝 Cadastrar Novo Usuário")
-        st.info("Aqui você pode cadastrar qualquer usuário e digitar o cargo/setor livremente.")
-
-        with st.form("form_novo_usuario", clear_on_submit=True):
+        st.subheader("📝 Novo Usuário")
+        with st.form("form_usuario", clear_on_submit=True):
             col1, col2 = st.columns(2)
-
             with col1:
-                novo_u = st.text_input("Login (Usuário)")
-                novo_n = st.text_input("Nome Completo")
-                # CAMPO LIVRE: Aqui você digita o que quiser
-                novo_c = st.text_input("Cargo ou Setor (Ex: Laser, Visitante, Cliente X)")
-
+                u_login = st.text_input("Login")
+                u_nome = st.text_input("Nome Completo")
+                u_cargo = st.text_input("Cargo/Setor (Livre)")
             with col2:
-                novo_s = st.text_input("Senha", type="password")
-                novo_nivel = st.selectbox("Nível de Acesso", ["USER", "LIDER", "ADM"],
-                                          help="ADM vê tudo. USER vê apenas a lista.")
-                novo_ativo = 1  # Usuário já entra ativo
+                u_senha = st.text_input("Senha", type="password")
+                u_nivel = st.selectbox("Nível", ["USER", "LIDER", "ADM"])
 
-            btn_salvar = st.form_submit_button("💾 Salvar no Google Sheets")
-
-            if btn_salvar:
-                if novo_u and novo_s and novo_c:
-                    try:
-                        # 1. Busca os usuários atuais para não duplicar
-                        df_existente = conn_sheets.read(worksheet="USUARIOS", ttl=0)
-
-                        # 2. Cria o novo usuário em formato de tabela
-                        novo_dado = pd.DataFrame([{
-                            "usuario": novo_u,
-                            "senha": novo_s,
-                            "nome": novo_n,
-                            "nivel": novo_nivel,
-                            "cargo": novo_c,
-                            "ativo": 1
-                        }])
-
-                        # 3. Junta o novo com os antigos
-                        df_atualizado = pd.concat([df_existente, novo_dado], ignore_index=True)
-
-                        # 4. Salva de volta na Planilha
-                        conn_sheets.update(worksheet="USUARIOS", data=df_atualizado)
-
-                        st.success(f"✅ Sucesso! {novo_n} cadastrado no setor '{novo_c}'.")
-                    except Exception as e:
-                        st.error(f"Erro ao salvar na nuvem: {e}")
+            if st.form_submit_button("💾 Salvar Usuário"):
+                if u_login and u_senha:
+                    df_u = conn_sheets.read(worksheet="USUARIOS", ttl=0)
+                    novo_u = pd.DataFrame(
+                        [{"usuario": u_login, "senha": u_senha, "nome": u_nome, "nivel": u_nivel, "cargo": u_cargo,
+                          "ativo": 1}])
+                    conn_sheets.update(worksheet="USUARIOS", data=pd.concat([df_u, novo_u], ignore_index=True))
+                    st.success(f"Usuário {u_nome} salvo!")
                 else:
-                    st.warning("⚠️ preencha Usuário, Senha e Cargo/Setor.")
+                    st.warning("Preencha Login e Senha.")
 
+    # --- ABA 2: CADASTRO DE MÁQUINAS (AQUI ESTÁ O QUE FALTAVA) ---
     with tab2:
-        st.subheader("👥 Usuários Cadastrados")
-        try:
-            df_lista = conn_sheets.read(worksheet="USUARIOS", ttl=0)
-            st.dataframe(df_lista[["usuario", "nome", "cargo", "nivel", "ativo"]], use_container_width=True)
+        st.subheader("🚜 Cadastrar Nova Máquina")
+        st.info("Digite o nome da máquina/equipamento para que ela apareça na criação de OPs.")
 
-            if st.button("🔄 Atualizar Lista"):
-                st.rerun()
-        except:
-            st.write("Nenhum usuário encontrado na aba 'USUARIOS' da planilha.")
+        with st.form("form_maquina", clear_on_submit=True):
+            nova_maq = st.text_input("Nome da Máquina (Ex: Dobra 01, Laser 2000, CNC)")
+
+            if st.form_submit_button("💾 Salvar Máquina"):
+                if nova_maq:
+                    try:
+                        # Lê máquinas atuais
+                        df_m = conn_sheets.read(worksheet="MAQUINAS", ttl=0)
+                        # Adiciona a nova
+                        novo_m = pd.DataFrame([{"nome_maquina": nova_maq.strip().upper()}])
+                        df_m_total = pd.concat([df_m, novo_m], ignore_index=True).drop_duplicates()
+                        # Atualiza planilha
+                        conn_sheets.update(worksheet="MAQUINAS", data=df_m_total)
+                        st.success(f"Máquina '{nova_maq}' cadastrada com sucesso!")
+                    except Exception as e:
+                        st.error(f"Erro ao salvar máquina: {e}")
+                else:
+                    st.warning("Digite o nome da máquina.")
+
+    # --- ABA 3: GESTÃO E VISUALIZAÇÃO ---
+    with tab3:
+        col_list1, col_list2 = st.columns(2)
+        with col_list1:
+            st.write("**Usuários Ativos:**")
+            try:
+                st.dataframe(conn_sheets.read(worksheet="USUARIOS", ttl=0)[["usuario", "cargo"]],
+                             use_container_width=True)
+            except:
+                st.write("Sem dados.")
+
+        with col_list2:
+            st.write("**Máquinas Cadastradas:**")
+            try:
+                st.dataframe(conn_sheets.read(worksheet="MAQUINAS", ttl=0), use_container_width=True)
+            except:
+                st.write("Sem dados.")
 
 # --- Nova Op ---
 elif menu == "➕ Nova OP":
@@ -819,6 +824,7 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
+
 
 
 
