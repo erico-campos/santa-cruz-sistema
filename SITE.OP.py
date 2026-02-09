@@ -684,5 +684,3 @@ elif menu == "📊 Relatório":
 
 
 
-
-
