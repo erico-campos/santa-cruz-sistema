@@ -274,16 +274,17 @@ def gerar_pdf_op(op_raw):
     return buffer.getvalue()
 
 
-# --- BLOCO DE LOGIN ÚNICO AJUSTADO PARA NUVEM ---
+# --- BLOCO DE LOGIN COM LIBERDADE TOTAL ---
 if not st.session_state.auth:
     st.title("🏭 Acesso - Santa Cruz Produção")
 
-    u = st.text_input("Usuário").strip()
-    p = st.text_input("Senha", type="password")
-    s_login = st.selectbox("Seu Setor/Cargo", ["ADM", "PCP", "LIDER", "PRODUCAO", "USINAGEM"])
+    u = st.text_input("Seu Nome / Usuário").strip()
+    # Trocamos o selectbox por text_input para você digitar o que quiser
+    s_login = st.text_input("Setor / Cargo / Cliente (Ex: Laser, Visitante, PCP)").strip()
+    p = st.text_input("Senha de Acesso", type="password")
 
     if st.button("Entrar", use_container_width=True):
-        # 1. Login Mestre
+        # 1. Login Mestre (Sempre funciona)
         if u == "admsantacruz" and p == "sc2024":
             st.session_state.update({
                 "auth": True, "nivel": "ADM",
@@ -291,20 +292,22 @@ if not st.session_state.auth:
             })
             st.rerun()
 
-        # 2. Login Livre (Qualquer nome + senha 123)
-        elif u != "" and p == "123":
-            nivel_acesso = "ADM" if s_login in ["ADM", "PCP"] else "USER"
+        # 2. Login com Autonomia Total (Aceita qualquer nome e setor)
+        elif u != "" and s_login != "" and p == "123":
+            # Se você digitar "ADM" ou "PCP" no setor, ele te dá nível ADM automaticamente
+            nivel_acesso = "ADM" if s_login.upper() in ["ADM", "PCP"] else "USER"
+
             st.session_state.update({
                 "auth": True,
                 "user_logado": u,
-                "cargo_logado": s_login,
+                "cargo_logado": s_login,  # Salva exatamente o que você digitou
                 "nivel": nivel_acesso
             })
             st.rerun()
         else:
-            st.error("Usuário ou Senha incorretos. (Dica: Use senha 123 para acesso livre)")
+            st.error("Preencha Nome e Setor. (Senha padrão: 123)")
 
-    st.stop()  # Bloqueia o app até logar
+    st.stop()
 
 # --- MENU LATERAL (SIDEBAR) ---
 with st.sidebar:
@@ -922,8 +925,6 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
-
-
 
 
 
