@@ -274,77 +274,37 @@ def gerar_pdf_op(op_raw):
     return buffer.getvalue()
 
 
-# --- BLOCO DE LOGIN ÚNICO E CORRIGIDO ---
+# --- BLOCO DE LOGIN ÚNICO AJUSTADO PARA NUVEM ---
 if not st.session_state.auth:
-    st.title("🏭 Login - Santa Cruz Produção Master")
+    st.title("🏭 Acesso - Santa Cruz Produção")
 
-    # 1. Busca os cargos existentes no banco para preencher o selectbox
-    try:
-        with sqlite3.connect('fabrica_master.db') as db_login:
-            res_c = db_login.execute("SELECT DISTINCT cargo FROM usuarios WHERE ativo=1").fetchall()
-            cargos = [c[0] for c in res_c]
-    except:
-        cargos = []
-
-    # Garante que as opções básicas existam para o primeiro acesso
-    if "ADM" not in cargos: cargos.append("ADM")
-    if "PCP" not in cargos: cargos.append("PCP")
-
-    # Layout de colunas para um visual mais limpo
-    col_u, col_c = st.columns([2, 1])
-    u = col_u.text_input("Usuário")
-    s_login = col_c.selectbox("Cargo", cargos)
+    u = st.text_input("Usuário").strip()
     p = st.text_input("Senha", type="password")
+    s_login = st.selectbox("Seu Setor/Cargo", ["ADM", "PCP", "LIDER", "PRODUCAO", "USINAGEM"])
 
     if st.button("Entrar", use_container_width=True):
-        # Limpeza de strings para evitar erros de espaços acidentais
-        u = u.strip()
+        # 1. Login Mestre
+        if u == "admsantacruz" and p == "sc2024":
+            st.session_state.update({
+                "auth": True, "nivel": "ADM",
+                "user_logado": "Administrador", "cargo_logado": "ADM"
+            })
+            st.rerun()
 
-        # 1. Verificação do Administrador Mestre (Hardware Coded)
-        if u == "admsantacruz" and p == "sc2024" and s_login == "ADM":
+        # 2. Login Livre (Qualquer nome + senha 123)
+        elif u != "" and p == "123":
+            nivel_acesso = "ADM" if s_login in ["ADM", "PCP"] else "USER"
             st.session_state.update({
                 "auth": True,
-                "nivel": "ADM",
-                "user_logado": "Administrador",
-                "cargo_logado": "ADM"
+                "user_logado": u,
+                "cargo_logado": s_login,
+                "nivel": nivel_acesso
             })
-            st.success("Bem-vindo, Administrador!")
             st.rerun()
         else:
-            # 2. Verificação no Banco de Dados Local
-            with sqlite3.connect('fabrica_master.db') as db_login:
-                # Usamos nomes de colunas explícitos para garantir a ordem (cargo, ativo, usuario)
-                res = db_login.execute(
-                    "SELECT cargo, ativo, usuario FROM usuarios WHERE usuario=? AND senha=? AND cargo=?",
-                    (u, p, s_login)
-                ).fetchone()
+            st.error("Usuário ou Senha incorretos. (Dica: Use senha 123 para acesso livre)")
 
-            if res:
-                if res[1] == 1:  # Verifica se res['ativo'] == 1
-                    # Define nível de permissão baseado no cargo
-                    cargo_atual = res[0].upper()
-                    nivel_acesso = "USER"
-
-                    if cargo_atual in ["PCP", "ADM"]:
-                        nivel_acesso = "ADM"
-                    elif "LIDER" in cargo_atual:
-                        nivel_acesso = "LIDER"
-
-                    st.session_state.update({
-                        "auth": True,
-                        "user_logado": res[2],
-                        "cargo_logado": res[0],
-                        "nivel": nivel_acesso
-                    })
-                    st.rerun()
-                else:
-                    st.error("Sua conta está desativada. Procure o Administrador.")
-            else:
-                st.error("Usuário, senha ou cargo incorretos.")
-
-    # Rodapé do Login
-    st.caption("© 2026 Santa Cruz - Sistema de Controle de Produção")
-    st.stop()  # Trava a execução do restante do app até autenticar
+    st.stop()  # Bloqueia o app até logar
 
 # --- MENU LATERAL (SIDEBAR) ---
 with st.sidebar:
@@ -962,6 +922,9 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
+
+
+
 
 
 
