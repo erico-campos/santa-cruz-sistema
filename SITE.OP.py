@@ -43,7 +43,7 @@ if not os.path.exists("anexos"):
     os.makedirs("anexos")
 
 # --- 5. CONEXÃO COM GOOGLE SHEETS ---
-conn_sheets = st.connection("gsheets", type=GSheetsConnection)
+conn_sheets = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 
 # --- AJUSTE AQUI: Variável global para o nome da aba ---
 # Após renomear na planilha, o código usará esta variável em todos os menus
@@ -695,10 +695,6 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
-
-
-
-
 
 
 
