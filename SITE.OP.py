@@ -16,6 +16,7 @@ import json
 from datetime import datetime, date
 from io import BytesIO
 import plotly.express as px
+from setuptools import gspread
 
 # --- 2. IMPORTAÇÃO DA CONEXÃO GOOGLE ---
 try:
@@ -339,19 +340,21 @@ with st.sidebar:
     st.write(f"🛠️ {cargo}")
 
 
-# --- PÁGINA DE CONFIGURAÇÕES (LIBERDADE TOTAL E GESTÃO) ---
+# --- PÁGINA DE CONFIGURAÇÕES (VERSÃO ESTÁVEL PARA NUVEM) ---
 if menu == "⚙️ Configurações":
     st.title("⚙️ Gestão de Fábrica - Santa Cruz")
 
     tab_u, tab_m = st.tabs(["👤 Usuários e Líderes", "🚜 Máquinas e Periféricos"])
 
-    # --- GESTÃO DE USUÁRIOS, LÍDERES, ADM, PCP ---
+    # --- GESTÃO DE USUÁRIOS ---
     with tab_u:
         st.subheader("📝 Cadastro de Pessoas")
 
         try:
+            # Tenta ler a aba USUARIOS
             df_u = conn_sheets.read(worksheet="USUARIOS", ttl=0)
-        except:
+        except Exception:
+            st.error("⚠️ Não foi possível ler a aba 'USUARIOS'. Verifique se ela existe na planilha.")
             df_u = pd.DataFrame(columns=["usuario", "senha", "nome", "nivel", "cargo", "ativo"])
 
         with st.expander("➕ Adicionar/Editar Usuário ou Líder"):
@@ -360,38 +363,39 @@ if menu == "⚙️ Configurações":
                 with col1:
                     u_id = st.text_input("ID/Login (Ex: pcp02, lider_laser)")
                     u_nome = st.text_input("Nome Completo")
-                    u_cargo = st.text_input("Cargo ou Setor (Ex: Líder de Montagem, PCP, ADM)")
+                    u_cargo = st.text_input("Cargo ou Setor (Livre)")
                 with col2:
                     u_senha = st.text_input("Senha", type="password")
-                    # Níveis conforme sua regra
                     u_nivel = st.selectbox("Nível de Acesso", ["USER", "LIDER", "ADM", "VENDAS"])
                     u_ativo = st.checkbox("Usuário Ativo", value=True)
 
                 if st.form_submit_button("💾 Salvar Registro"):
                     if u_id and u_senha:
-                        # Remove anterior para atualizar
+                        # Prepara os dados
                         df_u = df_u[df_u['usuario'] != u_id]
                         novo_u = pd.DataFrame([{
                             "usuario": u_id, "senha": u_senha, "nome": u_nome,
                             "nivel": u_nivel, "cargo": u_cargo, "ativo": 1 if u_ativo else 0
                         }])
                         df_final_u = pd.concat([df_u, novo_u], ignore_index=True)
-                        conn_sheets.create(worksheet="USUARIOS", data=df_final_u)
-                        st.success(f"Registro de {u_id} salvo com sucesso!")
-                        st.rerun()
 
-        # Tabela de Edição/Exclusão
-        st.write("---")
-        for i, row in df_u.iterrows():
-            c1, c2, c3 = st.columns([3, 1, 1])
-            status = "✅" if row['ativo'] == 1 else "🚫"
-            c1.write(f"{status} **{row['nome']}** | {row['cargo']} ({row['nivel']})")
-            if c3.button("🗑️ Apagar", key=f"del_u_{row['usuario']}"):
-                df_u = df_u[df_u['usuario'] != row['usuario']]
-                conn_sheets.update(worksheet="USUARIOS", data=df_u)
-                st.rerun()
+                        # TENTATIVA DE SALVAMENTO COM TRATAMENTO DE ERRO
+                        try:
+                            conn_sheets.update(worksheet="USUARIOS", data=df_final_u)
+                            st.success(f"✅ Registro de {u_id} salvo!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error("❌ O Google impediu a gravação.")
+                            st.info("""
+                            **Como resolver:**
+                            1. No seu Streamlit Cloud, vá em **Settings > Secrets**.
+                            2. Você deve colar as chaves JSON da sua **Service Account** do Google.
+                            3. Se você usou apenas o link da planilha, o Google só permite 'Ler', não permite 'Gravar'.
+                            """)
+                    else:
+                        st.warning("Preencha Login e Senha.")
 
-    # --- GESTÃO DE MÁQUINAS E PERIFÉRICOS ---
+    # --- GESTÃO DE MÁQUINAS ---
     with tab_m:
         st.subheader("🚜 Máquinas e Componentes")
         try:
@@ -401,21 +405,20 @@ if menu == "⚙️ Configurações":
 
         with st.form("form_maq"):
             m_nome = st.text_input("Nome da Máquina")
-            m_peri = st.text_area("Periféricos / Peças desta Máquina (separe por vírgula)")
+            m_peri = st.text_area("Periféricos / Peças (separe por vírgula)")
             if st.form_submit_button("💾 Salvar Máquina"):
-                df_m = df_m[df_m['nome_maquina'] != m_nome]
-                novo_m = pd.DataFrame([{"nome_maquina": m_nome.upper(), "perifericos": m_peri}])
-                conn_sheets.update(worksheet="MAQUINAS", data=pd.concat([df_m, novo_m], ignore_index=True))
-                st.rerun()
-
-        st.write("---")
-        for i, row in df_m.iterrows():
-            c_m1, c_m2 = st.columns([4, 1])
-            c_m1.write(f"🚜 **{row['nome_maquina']}**: {row['perifericos']}")
-            if c_m2.button("🗑️", key=f"del_m_{row['nome_maquina']}"):
-                df_m = df_m[df_m['nome_maquina'] != row['nome_maquina']]
-                conn_sheets.update(worksheet="MAQUINAS", data=df_m)
-                st.rerun()
+                if m_nome:
+                    df_m = df_m[df_m['nome_maquina'] != m_nome.upper()]
+                    novo_m = pd.DataFrame([{"nome_maquina": m_nome.upper(), "perifericos": m_peri}])
+                    df_final_m = pd.concat([df_m, novo_m], ignore_index=True)
+                    try:
+                        conn_sheets.update(worksheet="MAQUINAS", data=df_final_m)
+                        st.success("🚜 Máquina salva!")
+                        st.rerun()
+                    except:
+                        st.error("Erro de permissão ao salvar máquina.")
+                else:
+                    st.warning("Digite o nome da máquina.")
 
 # --- Nova Op ---
 # --- PÁGINA: NOVA OP ---
@@ -439,12 +442,23 @@ if menu == "➕ Nova OP":
         st.subheader("Configuração Técnica")
 
         col_m, col_d = st.columns([1, 1])
-        maquina_sel = col_m.selectbox("Selecione a Máquina", lista_maquinas)
 
-        # Busca periféricos da máquina selecionada para sugestão
+        # Se a lista estiver vazia, evita erro no selectbox
+        if len(lista_maquinas) > 0:
+            maquina_sel = col_m.selectbox("Selecione a Máquina", lista_maquinas)
+        else:
+            maquina_sel = col_m.selectbox("Selecione a Máquina", ["Nenhuma máquina cadastrada"])
+
+        # Busca periféricos (Proteção contra erro NameError ou Lista Vazia)
         perifericos_sugeridos = ""
-        if maquina_sel in lista_maquinas:
-            perifericos_sugeridos = df_maquinas[df_maquinas['nome_maquina'] == maquina_sel]['perifericos'].values[0]
+        if len(lista_maquinas) > 0 and maquina_sel != "Nenhuma máquina cadastrada":
+            try:
+                # Filtra a máquina e pega o valor dos periféricos
+                dados_maquina = df_maquinas[df_maquinas['nome_maquina'] == maquina_sel]
+                if not dados_maquina.empty:
+                    perifericos_sugeridos = dados_maquina['perifericos'].values[0]
+            except:
+                perifericos_sugeridos = ""
 
         pecas = st.text_area("Descrição das Peças / Periféricos", value=perifericos_sugeridos)
 
@@ -454,38 +468,41 @@ if menu == "➕ Nova OP":
         data_ent = c3.date_input("Data Prevista de Entrega")
         vendedor = c4.text_input("Vendedor Responsável")
 
+        # APENAS UM BOTÃO NO FINAL DO FORMULÁRIO
         btn_gerar = st.form_submit_button("🚀 Gerar Ordem de Produção")
 
-        if btn_gerar:
-            if n_op and cliente:
-                try:
-                    # Lê dados atuais
-                    df_dados = conn_sheets.read(worksheet="DADOS", ttl=0)
+    # --- LÓGICA DE SALVAMENTO (FORA DO WITH ST.FORM) ---
+    if btn_gerar:
+        if n_op and cliente and maquina_sel != "Nenhuma máquina cadastrada":
+            try:
+                # Lê dados atuais da aba DADOS
+                df_dados = conn_sheets.read(worksheet="DADOS", ttl=0)
 
-                    # Cria nova linha respeitando suas colunas da planilha
-                    nova_linha = pd.DataFrame([{
-                        "numero_op": n_op,
-                        "cliente": cliente,
-                        "data_op": pd.Timestamp.now().strftime('%d/%m/%Y'),
-                        "data_entrega": data_ent.strftime('%d/%m/%Y'),
-                        "vendedor": vendedor,
-                        "equipamento": maquina_sel,
-                        "info_adicionais_ficha": pecas,
-                        "status": "Pendente",
-                        "responsavel_setor": st.session_state.user_logado,  # Quem criou
-                        "progresso": 0,
-                        "checks_concluidos": ""
-                    }])
+                # Cria nova linha
+                nova_linha = pd.DataFrame([{
+                    "numero_op": n_op,
+                    "cliente": cliente,
+                    "data_op": pd.Timestamp.now().strftime('%d/%m/%Y'),
+                    "data_entrega": data_ent.strftime('%d/%m/%Y'),
+                    "vendedor": vendedor,
+                    "equipamento": maquina_sel,
+                    "info_adicionais_ficha": pecas,
+                    "status": "Pendente",
+                    "responsavel_setor": st.session_state.get('user_logado', 'Sistema'),
+                    "progresso": 0,
+                    "checks_concluidos": ""
+                }])
 
-                    # Atualiza Planilha
-                    df_final = pd.concat([df_dados, nova_linha], ignore_index=True)
-                    conn_sheets.update(worksheet="DADOS", data=df_final)
+                # Atualiza Planilha
+                df_final = pd.concat([df_dados, nova_linha], ignore_index=True)
+                conn_sheets.update(worksheet="DADOS", data=df_final)
 
-                    st.success(f"✅ OP {n_op} para {cliente} gerada com sucesso!")
-                except Exception as e:
-                    st.error(f"Erro ao salvar OP: {e}")
-            else:
-                st.warning("Preencha o Número da OP e o Cliente.")
+                st.success(f"✅ OP {n_op} para {cliente} gerada com sucesso!")
+                st.balloons()  # Um efeito visual de comemoração
+            except Exception as e:
+                st.error(f"Erro ao salvar OP: {e}")
+        else:
+            st.warning("Verifique se o Número da OP, Cliente e Máquina foram preenchidos.")
 
 # --- CONFIGURAÇÃO INICIAL E MANUTENÇÃO DO BANCO ---
 # Garante a existência do diretório para uploads de anexos
@@ -668,7 +685,6 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
-
 
 
 
