@@ -437,7 +437,7 @@ if menu == "➕ Nova OP":
 
     # 1. Busca lista de máquinas cadastradas
     try:
-        df_maquinas = conn_sheets.read(worksheet="MAQUINAS", ttl=0)
+        df_maquinas = conn_sheets.read(worksheet="maquinas", ttl=0)
         lista_maquinas = df_maquinas['nome_maquina'].tolist()
     except:
         lista_maquinas = ["Cadastre uma máquina primeiro"]
@@ -534,90 +534,97 @@ if menu == "📋 Lista de OPs":
     st.title("📋 Lista de Ordens de Produção")
 
     try:
-        # 1. Leitura dos dados da planilha
-        df = conn_sheets.read(ttl=0)
+        # 1. Leitura dos dados da aba correta
+        df = conn_sheets.read(worksheet="DADOS", ttl=0)
 
         if df.empty:
-            st.info("Nenhuma ordem de produção encontrada.")
+            st.info("Nenhuma ordem de produção encontrada na aba DADOS.")
         else:
             # --- LÓGICA DE FILTRO DE ACESSO ---
             cargo_user = str(st.session_state.cargo_logado).upper()
             nivel_user = st.session_state.nivel
             nome_user = st.session_state.user_logado
 
-            # Se for LIDER ou VENDAS, filtra para ver apenas o que é DELE
-            if nivel_user in ["LIDER", "VENDAS"] and "ADM" not in cargo_user and "PCP" not in cargo_user:
-                # Filtra pela coluna de quem criou a OP (ajuste o nome da coluna se necessário, ex: 'SOLICITANTE')
-                if 'SOLICITANTE' in df.columns:
-                    df = df[df['SOLICITANTE'] == nome_user]
-                st.warning(f"Exibindo apenas OPs criadas por: {nome_user}")
-
             # --- FILTROS DE PESQUISA NA TELA ---
             col_f1, col_f2 = st.columns(2)
+            # Ajustado para procurar na coluna 'cliente' da sua planilha
             busca_op = col_f1.text_input("🔍 Buscar por Número da OP ou Cliente")
 
-            status_opcoes = ["Todos"] + list(df['STATUS'].unique()) if 'STATUS' in df.columns else ["Todos"]
+            # Ajustado para a coluna 'status' (minúsculo) conforme sua planilha
+            status_opcoes = ["Todos"] + list(df['status'].unique()) if 'status' in df.columns else ["Todos"]
             filtro_status = col_f2.selectbox("Filtrar por Status", status_opcoes)
 
             # Aplica filtros de pesquisa
             if busca_op:
                 df = df[df.astype(str).apply(lambda x: busca_op.lower() in x.str.lower().values, axis=1)]
             if filtro_status != "Todos":
-                df = df[df['STATUS'] == filtro_status]
+                df = df[df['status'] == filtro_status]
 
             # --- EXIBIÇÃO DAS OPs EM CARDS ---
             st.write(f"Exibindo **{len(df)}** resultados:")
 
             for i, row in df.iterrows():
-                with st.expander(f"📦 OP: {row.get('OP', 'N/A')} - Cliente: {row.get('CLIENTE', 'N/A')}"):
+                # Trocamos OP por numero_op e CLIENTE por cliente
+                op_id = row.get('numero_op', 'N/A')
+                cliente_nome = row.get('cliente', 'N/A')
+
+                with st.expander(f"📦 OP: {op_id} - Cliente: {cliente_nome}"):
                     c1, c2, c3 = st.columns(3)
-                    c1.markdown(f"**Data:** {row.get('DATA', 'N/A')}")
-                    c2.markdown(f"**Máquina:** {row.get('MAQUINA', 'N/A')}")
+                    # Ajustado para os nomes das colunas da sua planilha (minúsculos)
+                    c1.markdown(f"**Data:** {row.get('data_op', 'N/A')}")
+                    c2.markdown(f"**Máquina:** {row.get('equipamento', 'N/A')}")
 
                     # Cor do Status
-                    status_atual = row.get('STATUS', 'Pendente')
+                    status_atual = row.get('status', 'Pendente')
                     cor = "🔴" if status_atual == "Pendente" else "🟡" if status_atual == "Em Produção" else "🟢"
                     c3.markdown(f"**Status:** {cor} {status_atual}")
 
                     st.divider()
-                    st.write(f"**Peças/Descrição:** {row.get('PEÇAS', 'N/A')}")
+                    # Trocamos PEÇAS por info_adicionais_ficha
+                    st.write(f"**Peças/Descrição:** {row.get('info_adicionais_ficha', 'N/A')}")
 
-                    # Botão para Ver Detalhes / Editar (Apenas ADM/PCP/LIDER podem editar)
-                    if nivel_user in ["ADM", "PCP", "LIDER"]:
-                        if st.button(f"📝 Editar OP {row.get('OP')}", key=f"edit_{i}"):
-                            st.session_state.op_para_editar = row.get('OP')
-                            st.info("Funcionalidade de edição selecionada.")
+                    # Botão para Ver Detalhes / Gerar PDF da OP
+                    col_b1, col_b2 = st.columns(2)
+                    if col_b1.button(f"📄 Gerar PDF OP {op_id}", key=f"pdf_{i}"):
+                        pdf_op = gerar_pdf_op(row)
+                        st.download_button(
+                            label="⬇️ Baixar PDF",
+                            data=pdf_op,
+                            file_name=f"OP_{op_id}.pdf",
+                            mime="application/pdf",
+                            key=f"dl_{i}"
+                        )
 
     except Exception as e:
         st.error(f"Erro ao carregar lista: {e}")
-        st.info("Verifique se a aba 'DADOS' é a primeira da sua planilha.")
+        st.info("Verifique se a aba 'DADOS' contém as colunas: numero_op, cliente, status, equipamento.")
 
 # --- RELATÓRIO DINÂMICO ---
 elif menu == "📊 Relatório":
     st.header("📊 Painel de Controle de Produção")
 
-    # 1. LEITURA DOS DADOS (GOOGLE SHEETS)
+    # 1. LEITURA DOS DADOS (ESPECIFICANDO A ABA DADOS)
     try:
-        df_rel = conn_sheets.read(ttl=0)
+        # Ajustado: Adicionado worksheet="DADOS" e ttl=0 para leitura em tempo real
+        df_rel = conn_sheets.read(worksheet="DADOS", ttl=0)
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro ao acessar a aba DADOS para o relatório: {e}")
         st.stop()
 
     if not df_rel.empty:
         # 2. TRATAMENTO DE DADOS PARA GRÁFICOS
-        # Converte progresso para numérico; 'coerce' transforma erros em NaN, que depois viram 0
+        # Garantimos que a coluna 'progresso' seja tratada como número
         df_rel['progresso'] = pd.to_numeric(df_rel['progresso'], errors='coerce').fillna(0)
 
-        # Garante que as colunas categóricas não tenham valores nulos para o Plotly
+        # Preenchimento de valores vazios para não quebrar os gráficos
         df_rel['responsavel_setor'] = df_rel['responsavel_setor'].fillna("Não Definido")
         df_rel['equipamento'] = df_rel['equipamento'].fillna("Não Informado")
 
-        # Filtramos apenas o que ainda está em linha de produção (Progresso < 100)
+        # Filtramos apenas o que ainda está em produção (Progresso < 100)
         df_fluxo = df_rel[df_rel['progresso'] < 100].copy()
 
         if df_fluxo.empty:
             st.success("🎉 Todas as OPs foram concluídas! Não há carga pendente no momento.")
-            # Opção de visualizar o histórico completo mesmo sem pendências
             if st.checkbox("Visualizar histórico de OPs concluídas"):
                 df_fluxo = df_rel.copy()
 
@@ -633,7 +640,7 @@ elif menu == "📊 Relatório":
             st.divider()
 
             # 4. EXPORTAÇÃO (PDF DO MAPA GERAL)
-            # Mapeamento para nomes amigáveis no PDF
+            # Mapeamento para nomes amigáveis no PDF (batendo com as colunas da sua planilha)
             df_pdf = df_fluxo.rename(columns={
                 'numero_op': 'Nº OP',
                 'cliente': 'Cliente',
@@ -643,7 +650,7 @@ elif menu == "📊 Relatório":
                 'progresso': 'Progresso %'
             })
 
-            # Gera o PDF usando a função revisada no Trecho 2
+            # Gera o PDF usando a função do seu código
             pdf_geral = gerar_pdf_relatorio_geral(df_pdf)
             st.download_button(
                 label="📥 Baixar Mapa Geral de Produção (PDF)",
@@ -658,7 +665,6 @@ elif menu == "📊 Relatório":
 
             with col_esq:
                 st.subheader("👥 Carga por Líder")
-                # Gráfico de Rosca para distribuição de trabalho
                 fig_pizza = px.pie(
                     df_fluxo,
                     names='responsavel_setor',
@@ -670,7 +676,6 @@ elif menu == "📊 Relatório":
 
             with col_dir:
                 st.subheader("📈 Progresso Individual")
-                # Gráfico de Barras para acompanhamento de status
                 fig_bar = px.bar(
                     df_fluxo,
                     x='numero_op',
@@ -685,7 +690,7 @@ elif menu == "📊 Relatório":
 
             st.divider()
 
-            # 6. TABELA DETALHADA (DATAFRAME INTERATIVO)
+            # 6. TABELA DETALHADA
             st.subheader("📋 Detalhamento da Produção")
             colunas_exibicao = ['numero_op', 'cliente', 'equipamento', 'responsavel_setor', 'data_entrega', 'progresso']
             st.dataframe(
@@ -694,7 +699,8 @@ elif menu == "📊 Relatório":
                 hide_index=True
             )
     else:
-        st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
+        st.info("A aba 'DADOS' está vazia. Cadastre uma OP para visualizar o relatório.")
+
 
 
 
