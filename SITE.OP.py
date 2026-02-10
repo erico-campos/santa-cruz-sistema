@@ -311,7 +311,7 @@ if not st.session_state.auth:
 
     st.stop()
 
-# --- MENU LATERAL (SIDEBAR) ---
+
 # --- LÓGICA DE ACESSO CONFORME CARGO E NÍVEL ---
 with st.sidebar:
     st.title("Santa Cruz Nav")
@@ -352,10 +352,13 @@ if menu == "⚙️ Configurações":
         st.subheader("📝 Cadastro de Pessoas")
 
         try:
-            # Tenta ler a aba USUARIOS
+            # Força a leitura sem cache (ttl=0)
             df_u = conn_sheets.read(worksheet="USUARIOS", ttl=0)
-        except Exception:
-            st.error("⚠️ Não foi possível ler a aba 'USUARIOS'. Verifique se ela existe na planilha.")
+            # Remove linhas vazias que o Google às vezes envia
+            df_u = df_u.dropna(how='all')
+        except Exception as e:
+            st.error(
+                f"⚠️ Erro ao acessar aba 'USUARIOS'. Verifique se o nome na planilha está exatamente 'USUARIOS' em maiúsculo.")
             df_u = pd.DataFrame(columns=["usuario", "senha", "nome", "nivel", "cargo", "ativo"])
 
         with st.expander("➕ Adicionar/Editar Usuário ou Líder"):
@@ -372,27 +375,24 @@ if menu == "⚙️ Configurações":
 
                 if st.form_submit_button("💾 Salvar Registro"):
                     if u_id and u_senha:
-                        # Prepara os dados
-                        df_u = df_u[df_u['usuario'] != u_id]
+                        # Filtra para não duplicar
+                        if not df_u.empty and 'usuario' in df_u.columns:
+                            df_u = df_u[df_u['usuario'] != u_id]
+
                         novo_u = pd.DataFrame([{
                             "usuario": u_id, "senha": u_senha, "nome": u_nome,
                             "nivel": u_nivel, "cargo": u_cargo, "ativo": 1 if u_ativo else 0
                         }])
                         df_final_u = pd.concat([df_u, novo_u], ignore_index=True)
 
-                        # TENTATIVA DE SALVAMENTO COM TRATAMENTO DE ERRO
                         try:
                             conn_sheets.update(worksheet="USUARIOS", data=df_final_u)
                             st.success(f"✅ Registro de {u_id} salvo!")
+                            st.cache_data.clear()  # Limpa o cache para a próxima leitura
                             st.rerun()
                         except Exception as e:
-                            st.error("❌ O Google impediu a gravação.")
-                            st.info("""
-                            **Como resolver:**
-                            1. No seu Streamlit Cloud, vá em **Settings > Secrets**.
-                            2. Você deve colar as chaves JSON da sua **Service Account** do Google.
-                            3. Se você usou apenas o link da planilha, o Google só permite 'Ler', não permite 'Gravar'.
-                            """)
+                            st.error(
+                                "❌ O Google impediu a gravação. Verifique se o e-mail da Service Account é 'Editor' na planilha.")
                     else:
                         st.warning("Preencha Login e Senha.")
 
@@ -400,29 +400,38 @@ if menu == "⚙️ Configurações":
     with tab_m:
         st.subheader("🚜 Máquinas e Componentes")
         try:
-            df_m = conn_sheets.read(worksheet="MAQUINAS", ttl=0)
-        except:
+            # AJUSTE: Mudamos de "MAQUINAS" para "maquinas" (minúsculo) para bater com sua planilha
+            df_m = conn_sheets.read(worksheet="maquinas", ttl=0)
+            df_m = df_m.dropna(how='all')
+        except Exception as e:
+            st.error("⚠️ Erro ao acessar aba 'maquinas'. Verifique se o nome na planilha está em minúsculo.")
             df_m = pd.DataFrame(columns=["nome_maquina", "perifericos"])
 
         with st.form("form_maq"):
             m_nome = st.text_input("Nome da Máquina")
             m_peri = st.text_area("Periféricos / Peças (separe por vírgula)")
+
             if st.form_submit_button("💾 Salvar Máquina"):
                 if m_nome:
-                    df_m = df_m[df_m['nome_maquina'] != m_nome.upper()]
+                    # Filtra para não duplicar
+                    if not df_m.empty and 'nome_maquina' in df_m.columns:
+                        df_m = df_m[df_m['nome_maquina'] != m_nome.upper()]
+
                     novo_m = pd.DataFrame([{"nome_maquina": m_nome.upper(), "perifericos": m_peri}])
                     df_final_m = pd.concat([df_m, novo_m], ignore_index=True)
+
                     try:
-                        conn_sheets.update(worksheet="MAQUINAS", data=df_final_m)
+                        conn_sheets.update(worksheet="maquinas", data=df_final_m)
                         st.success("🚜 Máquina salva!")
+                        st.cache_data.clear()
                         st.rerun()
-                    except:
-                        st.error("Erro de permissão ao salvar máquina.")
+                    except Exception as e:
+                        st.error(f"Erro de permissão ao salvar máquina: {e}")
                 else:
                     st.warning("Digite o nome da máquina.")
 
 # --- Nova Op ---
-# --- PÁGINA: NOVA OP ---
+
 if menu == "➕ Nova OP":
     st.title("➕ Abrir Nova Ordem de Produção")
 
@@ -686,6 +695,8 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
+
+
 
 
 
