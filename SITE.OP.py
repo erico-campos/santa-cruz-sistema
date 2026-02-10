@@ -16,7 +16,8 @@ import json
 from datetime import datetime, date
 from io import BytesIO
 import plotly.express as px
-from setuptools import gspread
+import gspread
+from google.oauth2.service_account import Credentials
 
 # --- 2. IMPORTAÇÃO DA CONEXÃO GOOGLE ---
 try:
@@ -685,6 +686,8 @@ elif menu == "📊 Relatório":
             )
     else:
         st.info("A planilha está vazia ou a aba 'DADOS' não foi populada. Cadastre uma OP para gerar o relatório.")
+
+
 
 
 
