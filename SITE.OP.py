@@ -456,20 +456,35 @@ if menu == "⚙️ Configurações":
                     col1.write(f"🏢 **{cli.get('nome', '---')}** | CNPJ: {cli.get('cnpj', '---')}")
                     if col2.button("🗑️", key=f"del_cli_{cli.get('id')}"):
                         supabase.table("clientes").delete().eq("id", cli.get('id')).execute()
-                        st.rerun()
+                        st.rerun
 
-# --- PÁGINA: NOVA OP ---
+# --- PÁGINA: NOVA OP (VERSÃO COMPLETA E PROTEGIDA) ---
 if menu == "➕ Nova OP":
     # 1. BUSCA DADOS DE APOIO
     df_maquinas = buscar_dados("maquinas")
     df_usuarios = buscar_dados("usuarios")
-    df_clientes_db = buscar_dados("clientes")  # Busca da nova tabela
+    df_clientes_db = buscar_dados("clientes")
 
-    lista_clientes = df_clientes_db['nome'].tolist() if not df_clientes_db.empty else []
-    lista_vendedores = df_usuarios[df_usuarios['nivel'] == 'VENDEDOR']['nome'].tolist()
-    lista_modelos = df_maquinas['nome_maquina'].tolist() if not df_maquinas.empty else []
+    # --- TRATAMENTO DE SEGURANÇA PARA LISTAS ---
+    lista_clientes = []
+    if not df_clientes_db.empty and 'nome' in df_clientes_db.columns:
+        lista_clientes = sorted(df_clientes_db['nome'].unique().tolist())
 
-    st.title("📄 ORDEM DE PRODUÇÃO")
+    lista_vendedores = []
+    if not df_usuarios.empty:
+        cols_u = df_usuarios.columns.tolist()
+        # Filtra vendedores se a coluna 'nivel' existir, senão pega todos para não travar
+        if 'nivel' in cols_u and 'nome' in cols_u:
+            lista_vendedores = df_usuarios[df_usuarios['nivel'] == 'VENDEDOR']['nome'].tolist()
+        elif 'nome' in cols_u:
+            lista_vendedores = df_usuarios['nome'].tolist()
+
+    lista_modelos = []
+    if not df_maquinas.empty and 'nome_maquina' in df_maquinas.columns:
+        lista_modelos = sorted(df_maquinas['nome_maquina'].unique().tolist())
+
+    st.title("📄 Ordem de Produção")
+    st.caption("Configure a estrutura e preencha os dados técnicos da máquina.")
 
     # 2. INICIALIZAÇÃO DA BIBLIOTECA NO SESSION STATE
     if 'biblioteca' not in st.session_state:
@@ -487,10 +502,13 @@ if menu == "➕ Nova OP":
     # --- PASSO 1: CONFIGURAR ESTRUTURA ---
     with st.expander("🏗️ PASSO 1: Configurar Estrutura (Editar Campos)",
                      expanded=not st.session_state.get('op_configurada')):
+        st.info("Aqui você pode adicionar, remover ou renomear campos antes de preencher.")
+
         for modulo in list(st.session_state.biblioteca.keys()):
             with st.container(border=True):
                 col_mod1, col_mod2 = st.columns([4, 1])
                 incluir = col_mod1.checkbox(f"📦 Módulo: **{modulo}**", value=True, key=f"check_{modulo}")
+
                 if col_mod2.button(f"🗑️", key=f"del_mod_{modulo}"):
                     del st.session_state.biblioteca[modulo]
                     st.rerun()
@@ -498,13 +516,13 @@ if menu == "➕ Nova OP":
                 if incluir:
                     for i, campo in enumerate(st.session_state.biblioteca[modulo]):
                         c_edit1, c_edit2 = st.columns([5, 1])
-                        # AQUI É ONDE VOCÊ RENOMEIA (Ex: Mudar Frasco para Balde)
-                        st.session_state.biblioteca[modulo][i] = c_edit1.text_input(f"Editar Nome do Campo",
-                                                                                    value=campo,
-                                                                                    key=f"f_{modulo}_{i}_{campo}")
+                        st.session_state.biblioteca[modulo][i] = c_edit1.text_input(
+                            f"Nome do Campo", value=campo, key=f"f_{modulo}_{i}_{campo}"
+                        )
                         if c_edit2.button("❌", key=f"btn_del_{modulo}_{i}"):
                             st.session_state.biblioteca[modulo].pop(i)
                             st.rerun()
+
                     if st.button(f"➕ Adicionar Campo em {modulo}", key=f"add_{modulo}"):
                         st.session_state.biblioteca[modulo].append("Novo Campo")
                         st.rerun()
@@ -524,57 +542,75 @@ if menu == "➕ Nova OP":
 
         for i, nome_aba in enumerate(abas_ativas):
             with abas[i]:
-                st.subheader(nome_aba)
+                st.subheader(f"Preenchimento: {nome_aba}")
                 for campo in st.session_state.biblioteca[nome_aba]:
                     key_input = f"input_{nome_aba}_{campo}"
 
-                    if "modelo da máquina" in campo.lower():
-                        st.session_state.valores_preenchidos[key_input] = st.selectbox("Selecione o Modelo",
-                                                                                       ["Selecione..."] + lista_modelos,
-                                                                                       key=key_input)
-                    elif campo.lower() == "cliente":
-                        st.session_state.valores_preenchidos[key_input] = st.selectbox("Selecione o Cliente",
-                                                                                       ["Selecione..."] + lista_clientes,
-                                                                                       key=key_input)
-                    elif campo.lower() == "vendedor":
-                        st.session_state.valores_preenchidos[key_input] = st.selectbox("Selecione o Vendedor",
-                                                                                       ["Selecione..."] + lista_vendedores,
-                                                                                       key=key_input)
+                    # Lógica de campos especiais (Selectboxes)
+                    campo_lower = campo.lower()
+                    if "modelo da máquina" in campo_lower or "equipamento" in campo_lower:
+                        st.session_state.valores_preenchidos[key_input] = st.selectbox(
+                            campo, ["Selecione..."] + lista_modelos, key=key_input
+                        )
+                    elif "cliente" in campo_lower and "endereço" not in campo_lower:
+                        st.session_state.valores_preenchidos[key_input] = st.selectbox(
+                            campo, ["Selecione..."] + lista_clientes, key=key_input
+                        )
+                    elif "vendedor" in campo_lower:
+                        st.session_state.valores_preenchidos[key_input] = st.selectbox(
+                            campo, ["Selecione..."] + lista_vendedores, key=key_input
+                        )
+                    elif "data" in campo_lower:
+                        # Campo de texto para data (mantendo flexibilidade de string)
+                        st.session_state.valores_preenchidos[key_input] = st.text_input(
+                            campo, placeholder="DD/MM/AAAA", key=key_input
+                        )
                     else:
                         st.session_state.valores_preenchidos[key_input] = st.text_input(campo, key=key_input)
 
         # --- BOTÃO SALVAR ---
         st.divider()
-        if st.button("🚀 SALVAR ORDEM DE PRODUÇÃO", type="primary", use_container_width=True):
-            # Lógica para pegar Número da OP e Máquina para as colunas principais
-            n_op_f, maq_f = "S/N", "N/A"
+        c_salvar, c_limpar = st.columns([3, 1])
+
+        if c_salvar.button("🚀 SALVAR ORDEM DE PRODUÇÃO", type="primary", use_container_width=True):
+            # Identificação das colunas principais para busca rápida na lista
+            n_op_f, maq_f, cli_f = "S/N", "N/A", "Não Informado"
+
             for k, v in st.session_state.valores_preenchidos.items():
-                if "n° op" in k.lower(): n_op_f = v
-                if "modelo da máquina" in k.lower(): maq_f = v
+                k_lower = k.lower()
+                if "n° op" in k_lower: n_op_f = v
+                if "modelo da máquina" in k_lower: maq_f = v
+                if "cliente" in k_lower and "endereço" not in k_lower: cli_f = v
 
             dados_salvar = {
                 "numero_op": n_op_f,
                 "equipamento": maq_f,
+                "cliente": cli_f,  # Salva na coluna principal para facilitar filtros
                 "especificacoes": {
                     "estrutura": st.session_state.biblioteca,
                     "valores": st.session_state.valores_preenchidos
                 },
                 "status": "Pendente",
+                "progresso": 0,
                 "data_op": datetime.now().strftime('%d/%m/%Y')
             }
+
             try:
                 supabase.table("ordens").upsert(dados_salvar, on_conflict="numero_op").execute()
-                st.success("✅ Ordem de Produção salva e enviada para a Lista!")
+                st.success(f"✅ Ordem de Produção {n_op_f} salva com sucesso!")
                 st.balloons()
-                st.session_state.op_configurada = False  # Reseta para a próxima
+                # Limpa estados para a próxima
+                st.session_state.op_configurada = False
+                st.session_state.valores_preenchidos = {}
                 st.rerun()
             except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
+                st.error(f"Erro ao salvar no banco: {e}")
 
-    if st.button("🔄 Reiniciar Construtor"):
-        st.session_state.op_configurada = False
-        st.session_state.valores_preenchidos = {}
-        st.rerun()
+        if c_limpar.button("🔄 Reiniciar Construtor", use_container_width=True):
+            st.session_state.op_configurada = False
+            st.session_state.valores_preenchidos = {}
+            st.rerun()
+
 
 # --- PÁGINA: LISTA DE OPs (VERSÃO COMPLETA E CORRIGIDA) ---
 if menu == "📋 Lista de OPs":
@@ -788,13 +824,6 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Sem dados para gerar relatórios.")
-
-
-
-
-
-
-
 
 
 
