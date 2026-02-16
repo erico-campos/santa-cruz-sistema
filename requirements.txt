@@ -1,8 +1,8 @@
 streamlit
 pandas
-st-gsheets-connection
+supabase
 plotly
 reportlab
 pytz
-
+st-gsheets-connection
 
