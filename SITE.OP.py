@@ -315,7 +315,7 @@ with st.sidebar:
         st.rerun()
 
 
-# --- PÁGINA DE CONFIGURAÇÕES COMPLETA (CORRIGIDA) ---
+# --- PÁGINA DE CONFIGURAÇÕES COMPLETA (INDENTAÇÃO CORRIGIDA) ---
 if menu == "⚙️ Configurações":
     # Trava de Segurança: Apenas nível ADM acessa
     if st.session_state.nivel != "ADM":
@@ -324,7 +324,7 @@ if menu == "⚙️ Configurações":
 
     st.header("⚙️ Gestão Administrativa - Santa Cruz")
 
-    # CORREÇÃO: Agora temos 3 nomes para as 3 variáveis t1, t2 e t3
+    # Criando as 3 abas
     t1, t2, t3 = st.tabs(["🏗️ Máquinas e Modelos", "🔑 Equipe Interna", "👤 Clientes"])
 
     # --- ABA 1: MÁQUINAS E CHECKLISTS ---
@@ -333,7 +333,7 @@ if menu == "⚙️ Configurações":
         df_m = buscar_dados("maquinas")
 
         val_n, val_c = "", ""
-        if st.session_state.edit_maq_id:
+        if st.session_state.get('edit_maq_id'):
             if not df_m.empty and 'id' in df_m.columns:
                 row = df_m[df_m['id'] == st.session_state.edit_maq_id]
                 if not row.empty:
@@ -348,7 +348,7 @@ if menu == "⚙️ Configurações":
             if c_m1.form_submit_button("💾 SALVAR NO SUPABASE"):
                 if n:
                     dados = {"nome_maquina": n.upper(), "perifericos": c}
-                    if st.session_state.edit_maq_id:
+                    if st.session_state.get('edit_maq_id'):
                         dados["id"] = st.session_state.edit_maq_id
                     supabase.table("maquinas").upsert(dados).execute()
                     st.session_state.edit_maq_id = None
@@ -372,7 +372,7 @@ if menu == "⚙️ Configurações":
                         supabase.table("maquinas").delete().eq("id", m_id).execute()
                         st.rerun()
 
-    # --- ABA 2: ACESSOS DA EQUIPE (ADM, LÍDER, VENDEDOR) ---
+    # --- ABA 2: ACESSOS DA EQUIPE ---
     with t2:
         st.subheader("🔑 Controle de Usuários e Acessos")
         df_u = buscar_dados("usuarios")
@@ -395,7 +395,7 @@ if menu == "⚙️ Configurações":
             u_senha = st.text_input("Senha", type="password")
             col_c, col_d = st.columns(2)
             u_cargo = col_c.text_input("Cargo / Setor", value=user_to_edit["cargo"])
-            niveis_lista = ["ADM", "LIDER", "VENDEDOR", "USER"] # Removi CLIENTE daqui para t3
+            niveis_lista = ["ADM", "LIDER", "VENDEDOR", "USER"]
             idx_nivel = niveis_lista.index(user_to_edit["nivel"]) if user_to_edit["nivel"] in niveis_lista else 3
             u_nivel = col_d.selectbox("Nível de Permissão", niveis_lista, index=idx_nivel)
 
@@ -404,7 +404,7 @@ if menu == "⚙️ Configurações":
                 if u_login and u_nome:
                     dados_u = {"usuario": u_login, "nome": u_nome, "cargo": u_cargo.upper(), "nivel": u_nivel, "ativo": 1}
                     if u_senha: dados_u["senha"] = u_senha
-                    if st.session_state.edit_usr_id: dados_u["id"] = st.session_state.edit_usr_id
+                    if st.session_state.get('edit_usr_id'): dados_u["id"] = st.session_state.edit_usr_id
                     supabase.table("usuarios").upsert(dados_u).execute()
                     st.session_state.edit_usr_id = None
                     st.success("Salvo com sucesso!")
@@ -430,33 +430,49 @@ if menu == "⚙️ Configurações":
                             supabase.table("usuarios").delete().eq("id", u_id).execute()
                             st.rerun()
 
-    # --- ABA 3: GESTÃO DE CLIENTES (SÓ PARA O CICLO DA OP) ---
+    # --- ABA 3: GESTÃO DE CLIENTES ---
     with t3:
-        st.subheader("👤 Clientes Registrados")
-        st.caption("Cadastre o cliente aqui para criar a OP. Você pode deletá-lo após finalizar o projeto.")
+        st.subheader("👤 Cadastro de Clientes")
+        st.caption("Estes clientes aparecerão na seleção da Nova OP.")
 
         with st.form("form_cliente_novo", clear_on_submit=True):
             c1, c2 = st.columns(2)
             n_cli = c1.text_input("Nome do Cliente / Empresa")
             cnpj_cli = c2.text_input("CNPJ / CPF")
             end_cli = st.text_input("Endereço de Entrega")
+
             if st.form_submit_button("💾 Salvar Cliente"):
                 if n_cli:
-                    supabase.table("clientes").insert(
-                        {"nome": n_cli.upper(), "cnpj": cnpj_cli, "endereco": end_cli}).execute()
-                    st.success("✅ Cliente cadastrado com sucesso!")
-                    st.rerun()
+                    try:
+                        dados_cliente = {
+                            "nome": n_cli.upper(),
+                            "cnpj": cnpj_cli if cnpj_cli else "",
+                            "endereco": end_cli if end_cli else ""
+                        }
+                        supabase.table("clientes").insert(dados_cliente).execute()
+                        st.success(f"✅ Cliente {n_cli.upper()} cadastrado!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro técnico ao salvar: {e}")
+                else:
+                    st.warning("O nome do cliente é obrigatório.")
 
         st.divider()
-        df_cli = buscar_dados("clientes")
-        if not df_cli.empty:
-            for _, cli in df_cli.iterrows():
-                with st.container(border=True):
-                    col1, col2 = st.columns([4, 1])
-                    col1.write(f"🏢 **{cli.get('nome', '---')}** | CNPJ: {cli.get('cnpj', '---')}")
-                    if col2.button("🗑️", key=f"del_cli_{cli.get('id')}"):
-                        supabase.table("clientes").delete().eq("id", cli.get('id')).execute()
-                        st.rerun
+        try:
+            df_cli = buscar_dados("clientes")
+            if not df_cli.empty:
+                for _, cli in df_cli.iterrows():
+                    with st.container(border=True):
+                        col1, col2 = st.columns([4, 1])
+                        nome_exibir = cli.get('nome', 'Sem Nome')
+                        cnpj_exibir = cli.get('cnpj', '---')
+                        col1.write(f"🏢 **{nome_exibir}** | CNPJ: {cnpj_exibir}")
+
+                        if col2.button("🗑️", key=f"del_cli_{cli.get('id')}"):
+                            supabase.table("clientes").delete().eq("id", cli.get('id')).execute()
+                            st.rerun()
+        except:
+            st.info("Ainda não há clientes cadastrados.")
 
 # --- PÁGINA: NOVA OP (VERSÃO COMPLETA E PROTEGIDA) ---
 if menu == "➕ Nova OP":
@@ -824,8 +840,6 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Sem dados para gerar relatórios.")
-
-
 
 
 
