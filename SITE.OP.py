@@ -729,27 +729,74 @@ if menu == "📋 Lista de OPs":
                             target.write(f"**{nome_campo}:** {valor}")
 
                 with t2:
-                    st.subheader("Checklist de Periféricos")
-                    df_m = buscar_dados("maquinas")
-                    if not df_m.empty:
-                        m_row = df_m[df_m['nome_maquina'] == row['equipamento']]
-                        if not m_row.empty:
-                            perifs = [p.strip() for p in str(m_row.iloc[0]['perifericos']).split(',') if p.strip()]
-                            concluidos = 0
-                            for p in perifs:
-                                check = st.checkbox(p, key=f"chk_{op_id}_{p}")
-                                if check:
-                                    # Feedback visual em Verde
-                                    st.markdown(f"✅ <span style='color:green; font-weight:bold'>{p} OK</span>",
-                                                unsafe_allow_html=True)
-                                    concluidos += 1
+                    st.subheader("✅ Checklist de Montagem")
 
-                            if st.button("💾 Atualizar Progresso", key=f"btn_p_{op_id}"):
-                                novo_p = int((concluidos / len(perifs)) * 100) if perifs else 0
-                                supabase.table("ordens").update({"progresso": novo_p}).eq("numero_op", op_id).execute()
+                    # 1. Identificação dos dados da OP
+                    maquina_da_op = row.get('equipamento', '')
+                    op_id_atual = row.get('numero_op')
+
+                    # 2. RECUPERAÇÃO DO ESTADO SALVO (O "pulo do gato")
+                    # Buscamos no JSON 'especificacoes' a lista de peças que já foram marcadas antes
+                    especs_atuais = row.get('especificacoes', {})
+                    if not isinstance(especs_atuais, dict): especs_atuais = {}
+
+                    # Se não houver nada salvo, começa com uma lista vazia
+                    pecas_concluidas_no_banco = especs_atuais.get('pecas_concluidas', [])
+
+                    # 3. Busca a lista de todas as peças que a máquina deve ter (o padrão)
+                    df_maq_ref = buscar_dados("maquinas")
+                    lista_total_perifericos = []
+
+                    if not df_maq_ref.empty and maquina_da_op:
+                        maq_alvo = df_maq_ref[df_maq_ref['nome_maquina'] == maquina_da_op]
+                        if not maq_alvo.empty:
+                            p_raw = str(maq_alvo.iloc[0].get('perifericos', ''))
+                            lista_total_perifericos = [p.strip() for p in p_raw.split(',') if p.strip()]
+
+                    # 4. EXIBIÇÃO DO CHECKLIST
+                    if lista_total_perifericos:
+                        st.write(f"Peças da máquina: **{maquina_da_op}**")
+
+                        # Criamos uma lista temporária para o que o usuário marcar agora
+                        novas_marcacoes = []
+
+                        for p in lista_total_perifericos:
+                            # AQUI ESTÁ A LÓGICA: Se a peça 'p' está na lista do banco,
+                            # o checkbox já inicia como TRUE (marcado)
+                            esta_pronto = p in pecas_concluidas_no_banco
+
+                            check = st.checkbox(p, value=esta_pronto, key=f"chk_{op_id_atual}_{p}")
+
+                            # Se estiver marcado (pelo banco ou pelo clique agora), mostra o aviso verde
+                            if check:
+                                st.markdown(f"🟢 **{p}** - CONCLUÍDO", unsafe_allow_html=True)
+                                novas_marcacoes.append(p)
+                            else:
+                                st.markdown(f"⚪ <span style='color:gray'>{p} - Pendente</span>", unsafe_allow_html=True)
+
+                        st.divider()
+
+                        # 5. BOTÃO PARA SALVAR
+                        if st.button(f"💾 Salvar Progresso OP {op_id_atual}", key=f"btn_save_{op_id_atual}"):
+                            total = len(lista_total_perifericos)
+                            prontos = len(novas_marcacoes)
+                            porcentagem = int((prontos / total) * 100)
+
+                            # Atualizamos o JSON com a nova lista de peças marcadas
+                            especs_atuais['pecas_concluidas'] = novas_marcacoes
+
+                            try:
+                                supabase.table("ordens").update({
+                                    "progresso": porcentagem,
+                                    "especificacoes": especs_atuais
+                                }).eq("numero_op", op_id_atual).execute()
+
+                                st.success(f"Salvo! {porcentagem}% concluído.")
                                 st.rerun()
-                        else:
-                            st.warning("Máquina não encontrada no cadastro para gerar checklist.")
+                            except Exception as e:
+                                st.error(f"Erro ao salvar: {e}")
+                    else:
+                        st.warning("Nenhuma peça cadastrada para este modelo.")
 
                 with t3:
                     st.subheader("Anexos e Documentos")
@@ -840,6 +887,8 @@ elif menu == "📊 Relatório":
 
     else:
         st.info("Sem dados para gerar relatórios.")
+
+
 
 
 
